@@ -1,0 +1,6 @@
+/agent-dlocal
+/mockdlocal
+/dist/
+/release/
+/.cache/
+/.DS_Store
