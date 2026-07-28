@@ -164,9 +164,24 @@ func withClient(flags *GlobalFlags, resolved *ResolvedProfile, url string, signe
 	return fn(ctx, client)
 }
 
-// GetRawItem fetches one path and writes the redacted result.
+// GetRawItem fetches one path from the payins host and writes the redacted
+// result.
 func GetRawItem(flags *GlobalFlags, path string, params url.Values) error {
-	return WithClient(flags, func(ctx context.Context, client *api.Client) error {
+	return writeFetched(flags, path, params, WithClient)
+}
+
+// GetPayoutRawItem is GetRawItem against the payouts host and signer.
+func GetPayoutRawItem(flags *GlobalFlags, path string, params url.Values) error {
+	return writeFetched(flags, path, params, WithPayoutsClient)
+}
+
+func writeFetched(
+	flags *GlobalFlags,
+	path string,
+	params url.Values,
+	with func(*GlobalFlags, func(context.Context, *api.Client) error) error,
+) error {
+	return with(flags, func(ctx context.Context, client *api.Client) error {
 		item, err := FetchItem(ctx, client, flags, path, params)
 		if err != nil {
 			return err
