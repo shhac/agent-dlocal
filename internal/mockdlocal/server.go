@@ -31,11 +31,12 @@ const (
 // the API does — if the two ever disagree, a test fails instead of both moving
 // together.
 const (
-	codeInvalidCredentials = 3001 // 403
-	codePaymentNotFound    = 4000 // 404, also used for orders and chargebacks
-	codeRefundNotFound     = 4001 // 404
-	codeSignatureMismatch  = 5000 // 400 — note: NOT a 401
-	codeInvalidParameter   = 5001 // 400
+	codeInvalidCredentials  = 3001 // 403
+	codePaymentNotFound     = 4000 // 404, also used for orders and chargebacks
+	codeRefundNotFound      = 4001 // 404
+	codeSignatureMismatch   = 5000 // 400 — note: NOT a 401; also means "Invalid request"
+	codeInvalidParameter    = 5001 // 400
+	codeCountryNotSupported = 5003 // 400 — unknown, empty, or non-two-letter country
 )
 
 type Options struct {

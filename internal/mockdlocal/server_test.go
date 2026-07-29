@@ -286,3 +286,25 @@ func TestPaymentStatusReturnsOnlyTheTriple(t *testing.T) {
 		t.Fatal("the status endpoint returned a payer block; it should be the triple only")
 	}
 }
+
+// The real API rejects an unsupported country with 5003. A mock that accepted
+// any two-letter string would let a bad code pass in tests and fail in
+// production.
+func TestUnsupportedCountryIsRejected(t *testing.T) {
+	for _, country := range []string{"ZZ", "BRA", "", "b"} {
+		rec := do(t, signedRequest(t, http.MethodGet, "/payments-methods?country="+country))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("country=%q: status = %d, want 400", country, rec.Code)
+			continue
+		}
+		var body map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		if body["code"] != float64(codeCountryNotSupported) {
+			t.Errorf("country=%q: code = %v, want %d", country, body["code"], codeCountryNotSupported)
+		}
+	}
+	// A supported one still works.
+	if rec := do(t, signedRequest(t, http.MethodGet, "/payments-methods?country=BR")); rec.Code != http.StatusOK {
+		t.Errorf("country=BR: status = %d, want 200", rec.Code)
+	}
+}

@@ -16,8 +16,11 @@ const (
 	codeInvalidCredentials = 3001 // 403 — login/trans-key rejected, or caller IP not allowlisted
 	codePaymentNotFound    = 4000 // 404 — also used for orders and chargebacks
 	codeRefundNotFound     = 4001 // 404
-	codeSignatureMismatch  = 5000 // 400 — the digest did not match
-	codeInvalidParameter   = 5001 // 400 — missing or malformed parameter/header
+	// 5000 is overloaded: "Signature not match" AND "Invalid request" for a
+	// malformed path both use it, so the message has to disambiguate.
+	codeSignatureOrBadRequest = 5000 // 400
+	codeInvalidParameter      = 5001 // 400 — missing or malformed parameter/header
+	codeCountryNotSupported   = 5003 // 400 — unknown or empty country
 )
 
 // dLocal error bodies are {"code", "message"} plus a key naming the offending
@@ -120,11 +123,22 @@ func classifyHTTPError(status, maxRetries int, body []byte) *agenterrors.APIErro
 	// Classify on the numeric payins code where there is one — it is more
 	// precise than the HTTP status and does not always agree with it.
 	switch parsed.Code.Number {
-	case codeSignatureMismatch:
+	case codeSignatureOrBadRequest:
+		// Telling someone to re-check their secret key because they typo'd a
+		// path would be worse than saying nothing, so the two meanings of 5000
+		// are separated on the message.
+		if !strings.Contains(strings.ToLower(message), "signature") {
+			return withHint(agenterrors.New("Bad request: "+message, agenterrors.FixableByAgent),
+				append(hints, "dLocal rejected the request shape itself — usually a malformed or empty path segment, e.g. an id that resolved to nothing")...)
+		}
 		return withHint(agenterrors.New("Signature rejected: "+message, agenterrors.FixableByHuman),
 			append(hints,
 				"dLocal recomputed HMAC-SHA256(secret, X-Login + X-Date + body) and got a different digest. The stored secret key is the usual cause — check it was copied in full with 'agent-dlocal auth update <profile> --form'",
 				"Note the X-Date is signed as well as sent, so a skewed system clock does NOT cause this: the signature stays self-consistent")...)
+
+	case codeCountryNotSupported:
+		return withHint(agenterrors.New(message, agenterrors.FixableByAgent),
+			append(hints, "Pass a supported ISO 3166-1 alpha-2 code (two letters, e.g. BR, MX, CO). An empty or three-letter code lands here too")...)
 
 	case codeInvalidCredentials:
 		return withHint(agenterrors.New("Credentials rejected: "+message, agenterrors.FixableByHuman),

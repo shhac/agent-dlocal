@@ -25,7 +25,7 @@ Payins (served at the root):
 | `GET /orders/{order_id}` | Order fixture linking `order_id` → `payment_id` |
 | `GET /refunds/{id}` | Refund fixture |
 | `GET /chargebacks/{id}` | Chargeback fixture |
-| `GET /payments-methods?country=XX` | Payment-method array for the country |
+| `GET /payments-methods?country=XX` | Payment-method array; an absent country is `5001`, an unsupported one `5003` |
 
 Payouts (same server, so one `httptest.Server` covers both hosts in tests):
 
@@ -76,6 +76,24 @@ The payouts route verifies the same `Authorization` signature as payins and **re
 documentation. It reports a bad signature as `403 authentication_failed` with a STRING code, where
 payins uses `400`/`5000` with a numeric one, so a client that assumes one error contract fails a
 test rather than in production.
+
+### Fidelity checks
+
+The mock is only worth having if it fails where the real API fails. These were each found by
+diffing the two and are now reproduced:
+
+| Case | Real API | Mock |
+|---|---|---|
+| absent `country` | `400`/`5001` + `param` | same |
+| unsupported `country` (`ZZ`, `BRA`, empty) | `400`/`5003` | same — it validates against a country list, not just a two-letter shape |
+| bad signature (payins) | `400`/`5000` | same |
+| bad signature (payouts) | `403`/`"authentication_failed"` | same |
+| `Payload-Signature` on payouts | `401`/`"invalid_credentials"` | same |
+| unknown payment / order / chargeback | `404`/`4000` | same |
+| unknown refund | `404`/`4001` | same |
+| unknown payout | `404`/`"payout_not_found_id"` | same |
+| unrouted path | `404` bare `NOT_FOUND` | same |
+| stale `X-Date` | accepted | accepted |
 
 ### Deliberately out of scope
 

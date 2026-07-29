@@ -188,10 +188,25 @@ func handleChargeback(w http.ResponseWriter, r *http.Request, _ []byte) {
 	})
 }
 
+// supportedCountries is a representative slice of dLocal's markets. The real
+// API rejects anything outside its list with 5003, so a mock that accepted any
+// two-letter string would let a bad country code pass here and fail in
+// production — the exact asymmetry a mock exists to prevent.
+var supportedCountries = map[string]bool{
+	"AR": true, "BR": true, "CL": true, "CO": true, "MX": true, "PE": true, "UY": true,
+	"EG": true, "GH": true, "KE": true, "MA": true, "NG": true, "SN": true, "ZA": true,
+	"BD": true, "ID": true, "IN": true, "MY": true, "PH": true, "TH": true, "VN": true,
+}
+
 func handlePaymentMethods(w http.ResponseWriter, r *http.Request, _ []byte) {
-	country := r.URL.Query().Get("country")
-	if country == "" {
+	// The real API distinguishes an ABSENT country (5001, missing parameter)
+	// from an EMPTY or unsupported one (5003, country not supported).
+	if !r.URL.Query().Has("country") {
 		writeErrorParam(w, http.StatusBadRequest, codeInvalidParameter, "Missing parameter: country", "country")
+		return
+	}
+	if !supportedCountries[r.URL.Query().Get("country")] {
+		writeError(w, http.StatusBadRequest, codeCountryNotSupported, "Country not supported")
 		return
 	}
 	// The real response carries exactly these five keys per entry — no country
