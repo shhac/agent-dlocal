@@ -110,3 +110,42 @@ func TestParseExposeNormalizesAndDedupes(t *testing.T) {
 		t.Fatalf("ParseExpose = %v, want %s", got, want)
 	}
 }
+
+// The shared walker inserts a "[]" segment for array elements, so an
+// array-shaped response yields paths like "[].payer.address.city". A
+// start-anchored subtree match misses those entirely, leaking the whole payer
+// address block — city, street, postcode — from any list response.
+//
+// This is not hypothetical: `api get` returns arrays, and --debug logs the raw
+// body through the same policy.
+func TestRedactMasksPayerPIIInsideAnArrayResponse(t *testing.T) {
+	got := redactToJSON(t, "["+paymentFixture+"]")
+
+	for _, secret := range []string{
+		"Thiago Gabriel", "thiago@example.com", "53033315550", "12345",
+		"203.0.113.7", "2fg3d4gf234", "Volta Redonda", "27275-595",
+		"Servidao B-1", "4111111111111111",
+	} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("array-shaped response leaked %q:\n%s", secret, got)
+		}
+	}
+	// Triage fields still survive inside an array.
+	for _, keep := range []string{"REJECTED", "VI", "1111", "411111"} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("array-shaped response dropped triage field %q:\n%s", keep, got)
+		}
+	}
+}
+
+// A subtree nested below the top level must also be masked — the rule has to be
+// segment-aware, not merely tolerant of one leading "[]".
+func TestRedactMasksPayerPIINestedBelowTopLevel(t *testing.T) {
+	got := redactToJSON(t, `{"evidence":{"payment":`+paymentFixture+`}}`)
+
+	for _, secret := range []string{"Volta Redonda", "27275-595", "Servidao B-1", "53033315550"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("nested payment leaked %q:\n%s", secret, got)
+		}
+	}
+}

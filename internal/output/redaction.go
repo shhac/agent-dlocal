@@ -1,6 +1,7 @@
 package output
 
 import (
+	"slices"
 	"strings"
 
 	out "github.com/shhac/lib-agent-output"
@@ -88,7 +89,7 @@ func shouldRedactField(key, path string) bool {
 	p := strings.ToLower(path)
 
 	for _, subtree := range piiSubtrees {
-		if p == subtree || strings.HasPrefix(p, subtree+".") {
+		if pathWithin(p, subtree) {
 			return true
 		}
 	}
@@ -119,6 +120,41 @@ func shouldRedactField(key, path string) bool {
 		k == "login" ||
 		strings.Contains(k, "signature") ||
 		k == "authorization"
+}
+
+// pathWithin reports whether path sits at or below subtree, matching on whole
+// segments anywhere in the path rather than only at its start.
+//
+// Anchoring at the start was a real leak. The shared walker prefixes array
+// elements with a "[]" segment and `investigate` nests records under
+// "evidence.payment", so the paths that actually reach this rule look like
+// "[].payer.address.city" and "evidence.payment.payer.address.city" — neither
+// of which starts with "payer.address". The key-based rules masked name, email
+// and document, which made the gap look closed while the whole address block
+// went out in clear.
+func pathWithin(path, subtree string) bool {
+	segments := splitPathSegments(path)
+	want := strings.Split(subtree, ".")
+
+	for i := 0; i+len(want) <= len(segments); i++ {
+		if slices.Equal(segments[i:i+len(want)], want) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitPathSegments drops the walker's "[]" array markers so an element's path
+// compares equal to the same field outside an array.
+func splitPathSegments(path string) []string {
+	raw := strings.Split(path, ".")
+	segments := make([]string, 0, len(raw))
+	for _, segment := range raw {
+		if segment = strings.TrimSuffix(segment, "[]"); segment != "" {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
 }
 
 func normalizeExpose(value string) string {
