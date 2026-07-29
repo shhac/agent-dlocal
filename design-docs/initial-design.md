@@ -93,6 +93,25 @@ signature = hex_lower(HMAC_SHA256(secretKey, X-Login || X-Date || rawRequestBody
 
 For a GET the body is the empty string, so the signed message is `X-Login || X-Date`.
 
+### One signer, one client shape
+
+Payins and payouts share the signer AND the client. `Host` is a value
+(`HostPayins` / `HostPayouts`) selecting which base URL to read, and `Session`
+carries the client plus the non-secret profile metadata a command may report.
+
+> **Simplified after the signer finding.** There were once eight entry points in
+> `internal/cli/shared` — `WithClient`/`WithPayoutsClient`,
+> `GetEntities`/`GetPayoutEntities`, `GetRawItem`/`GetPayoutRawItem`, plus
+> `WithResolvedClient` and `WithResolvedProfile` — varying along one axis. They
+> were parallel constructors from when payouts genuinely needed a different
+> signer as well as a different host. Once the signer difference was disproved
+> only a URL field remained, but the function-per-variant shape survived.
+> Adding a third host is now a constant, not five functions.
+>
+> `WithSessionResult[T]` exists because the error-only contract forced every
+> command that produces a value to declare an outer variable and assign it
+> inside a closure — a workaround all four investigate commands had copied.
+
 ### The payouts signer: there isn't one
 
 > **Correction, from live testing.** This section originally specified a separate payouts signer
@@ -273,9 +292,13 @@ dLocal's markets. Redacted by default:
 `card.last4`, `card.brand`, `card.bin`, and the status triple are **not** redacted — they are what
 triage runs on.
 
-Debug output (`--debug`) redacts the `Authorization` / `Payload-Signature` header value and the
-`X-Login` / `X-Trans-Key` header values. The signature is a secret-derived value; echoing it into a
-transcript would leak an oracle.
+Debug output (`--debug`) logs the request URL, status, signer scheme and response body. It does
+**not** log request headers at all, so the signature and credential headers have no path to a
+transcript — the strongest available guarantee, and simpler than masking them.
+
+> An earlier version carried a `SafeHeaders` masking helper for this. Nothing called it: `logDebug`
+> never logged request headers, so the layer masked something that was never emitted while implying
+> to readers that request headers *were* being logged safely somewhere. Deleted.
 
 ### Error mapping — the status triple
 

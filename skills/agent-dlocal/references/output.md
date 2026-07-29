@@ -57,6 +57,6 @@ Stored credentials are never exposable by any flag.
 ## Debug
 
 `--debug` writes `@debug` lines to stderr with the request URL, status, signer scheme, and response
-body. The `Authorization`, `Payload-Signature`, `X-Login`, and `X-Trans-Key` header values are
-masked unconditionally — the signature is derived from the secret key, so echoing it would hand out
-an oracle.
+body — **request headers are never logged**, so the signature and the credential headers cannot
+reach a transcript at all. The response body goes through the same redaction policy as normal
+output.

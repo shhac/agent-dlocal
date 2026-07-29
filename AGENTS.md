@@ -22,10 +22,11 @@ patterns.
 - **Read-only by default.** Every command is a `GET`. No mutating command ships without a design
   document that explicitly approves it — dLocal refunds and payouts move real money in markets where
   reversal is slow or impossible. The `api` group has no `--method` flag on purpose; do not add one.
-- **Never print, log, or persist credentials outside the credential backend.** This includes the
-  `Authorization` / `Payload-Signature` values and any `X-Login` / `X-Trans-Key` echo in `--debug`
-  output. `internal/credential` has no method that returns a printable secret, and it should stay
-  that way.
+- **Never print, log, or persist credentials outside the credential backend.** `--debug` logs the
+  request URL, status and RESPONSE BODY only — request headers are never logged, so the signature
+  and the credential headers have no path to a transcript. If you ever add request-header logging,
+  mask `Authorization`, `X-Login` and `X-Trans-Key` first. `internal/credential` has no method that
+  returns a printable secret, and it should stay that way.
 - **Keep list outputs compact and NDJSON-friendly.**
 - **Sign what you send.** The client serializes a body once into a `[]byte` that is both signed and
   sent. Do not add a path that marshals separately for signing — key ordering or whitespace drift
