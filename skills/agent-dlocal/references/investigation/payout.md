@@ -8,8 +8,12 @@ Answers: **where is this payout?**
 
 ## What it reads
 
-`GET /v2/payouts/{id}` on the payouts host, signed with the `Payload-Signature` scheme. Same profile
-credentials as payins; different host and different signature construction, handled transparently.
+`GET /v2/payouts/{id}` on the payouts host (`marketplace-api.dlocal.com`), using the same profile
+credentials and the same signing scheme as payins — only the host differs.
+
+Its error bodies differ from payins, though: codes are strings (`payout_not_found_id`,
+`authentication_failed`) rather than numbers, and the offending field arrives under `field` instead
+of `param`. agent-dlocal normalizes both, so you read one error contract.
 
 ## What it returns
 

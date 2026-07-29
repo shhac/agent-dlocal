@@ -135,31 +135,10 @@ func TestStaleDateIsAcceptedBecauseItIsSigned(t *testing.T) {
 	}
 }
 
-// A payouts request signed the payins way (or vice versa) must fail, so the two
-// signers cannot be confused without a test noticing.
-func TestPayoutsRejectsThePayinsScheme(t *testing.T) {
-	rec := do(t, signedRequest(t, http.MethodGet, "/v2/payouts/P-1-paid"))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for a payins-signed payouts request", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "payins scheme") {
-		t.Fatalf("401 body should name the scheme mix-up:\n%s", rec.Body)
-	}
-}
-
-func TestPayoutsAcceptsPayloadSignature(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/v2/payouts/P-1-delivered", nil)
-	date := time.Now().UTC().Format("2006-01-02T15:04:05.000") + "Z"
-	req.Header.Set("X-Login", DefaultLogin)
-	req.Header.Set("X-Trans-Key", DefaultTransKey)
-	req.Header.Set("X-Date", date)
-
-	// Payouts v2 hashes the body ALONE — here, the empty string.
-	mac := hmac.New(sha256.New, []byte(DefaultSecretKey))
-	req.Header.Set("Payload-Signature", hex.EncodeToString(mac.Sum(nil)))
-
-	rec := do(t, req)
+// The payouts host accepts the payins signature scheme — same header, same
+// message. Only the host differs.
+func TestPayoutsAcceptsThePayinsScheme(t *testing.T) {
+	rec := do(t, signedRequest(t, http.MethodGet, "/v2/payouts/P-1-delivered"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200\n%s", rec.Code, rec.Body)
@@ -168,6 +147,46 @@ func TestPayoutsAcceptsPayloadSignature(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &payout)
 	if payout["status"] != "DELIVERED" || payout["status_code"] != "500" {
 		t.Fatalf("payout fixture did not match the -delivered suffix: %v", payout)
+	}
+}
+
+// Payload-Signature is what the docs describe and what the real host REJECTS.
+func TestPayoutsRejectsPayloadSignature(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v2/payouts/P-1-paid", nil)
+	date := time.Now().UTC().Format("2006-01-02T15:04:05.000") + "Z"
+	req.Header.Set("X-Login", DefaultLogin)
+	req.Header.Set("X-Trans-Key", DefaultTransKey)
+	req.Header.Set("X-Date", date)
+	mac := hmac.New(sha256.New, []byte(DefaultSecretKey))
+	req.Header.Set("Payload-Signature", hex.EncodeToString(mac.Sum(nil)))
+
+	rec := do(t, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 — the payouts host does not know this scheme", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != "invalid_credentials" {
+		t.Fatalf("code = %v, want the string \"invalid_credentials\"", body["code"])
+	}
+}
+
+// The payouts host reports a bad signature as 403 authentication_failed with a
+// STRING code, where payins uses 400/5000 with a numeric one.
+func TestPayoutsBadSignatureUsesStringCode(t *testing.T) {
+	req := signedRequest(t, http.MethodGet, "/v2/payouts/P-1-paid")
+	req.Header.Set("Authorization", authPrefix+strings.Repeat("0", 64))
+
+	rec := do(t, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != "authentication_failed" {
+		t.Fatalf("code = %v, want authentication_failed", body["code"])
 	}
 }
 

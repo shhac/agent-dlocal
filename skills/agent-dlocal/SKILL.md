@@ -111,7 +111,8 @@ Payouts use a **different** table — code 500 means `DELIVERED` for a payout an
   404 is often really an environment mix-up. dLocal keys carry no `test`/`live` marker, so check the
   profile: `agent-dlocal auth list`.
 - **Read the dLocal `code`, not the HTTP status.** They disagree: a bad signature is
-  `400 {"code":5000}`, not a 401. `403 {"code":3001} Invalid credentials` is returned *before* the
+  `400 {"code":5000}` on payins, and `403 {"code":"authentication_failed"}` on payouts. Note payouts
+  codes are *strings* while payins codes are *numbers*. `403 {"code":3001} Invalid credentials` is returned *before* the
   signature is checked, so it means the caller was rejected outright — most often the machine's IP
   is not on the dashboard's IP Whitelist for that product and environment, or the profile points at
   the wrong host.

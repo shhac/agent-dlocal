@@ -31,7 +31,7 @@ Payouts (same server, so one `httptest.Server` covers both hosts in tests):
 
 | Route | Behavior |
 |---|---|
-| `GET /v2/payouts/{id}` | Payout fixture; verifies the `Payload-Signature` header instead of `Authorization` |
+| `GET /v2/payouts/{id}` | Payout fixture; same signing scheme as payins, but payouts-shaped (string-code) errors |
 
 Meta:
 
@@ -71,8 +71,11 @@ Every route except `GET /` enforces, in order:
 The expected credentials default to `mocklogin` / `mocktrans` / `mocksecret` and are overridable
 with `--login`, `--trans-key`, `--secret-key`.
 
-The payouts route verifies `Payload-Signature` and rejects a request that carries a payins-style
-`Authorization` header instead, so the two signers cannot be confused without a test failing.
+The payouts route verifies the same `Authorization` signature as payins and **rejects**
+`Payload-Signature` with `401 invalid_credentials` — matching the real host, and contradicting the
+documentation. It reports a bad signature as `403 authentication_failed` with a STRING code, where
+payins uses `400`/`5000` with a numeric one, so a client that assumes one error contract fails a
+test rather than in production.
 
 ### Deliberately out of scope
 

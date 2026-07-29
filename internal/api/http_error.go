@@ -20,15 +20,51 @@ const (
 	codeInvalidParameter   = 5001 // 400 — missing or malformed parameter/header
 )
 
-// dLocal error bodies are {"code", "message"} and sometimes carry "param"
-// naming the offending field. Some endpoints instead return the status triple.
+// dLocal error bodies are {"code", "message"} plus a key naming the offending
+// field. The two APIs disagree on both halves: payins returns a NUMERIC code
+// with "param", payouts returns a STRING code ("payout_not_found_id") with
+// "field". A struct typed for one silently fails to parse the other, losing the
+// message, so code is decoded leniently and both field names are accepted.
 type dlocalError struct {
-	Code         int    `json:"code"`
-	Message      string `json:"message"`
-	Param        string `json:"param"`
-	Status       string `json:"status"`
-	StatusCode   string `json:"status_code"`
-	StatusDetail string `json:"status_detail"`
+	Code         flexibleCode `json:"code"`
+	Message      string       `json:"message"`
+	Param        string       `json:"param"`
+	Field        string       `json:"field"`
+	Status       string       `json:"status"`
+	StatusCode   string       `json:"status_code"`
+	StatusDetail string       `json:"status_detail"`
+}
+
+// offender names the rejected field, whichever key the API used for it.
+func (e dlocalError) offender() string {
+	if e.Param != "" {
+		return e.Param
+	}
+	return e.Field
+}
+
+// flexibleCode holds a dLocal error code that may arrive as a number (payins)
+// or a string (payouts).
+type flexibleCode struct {
+	Number int
+	Text   string
+}
+
+func (c *flexibleCode) UnmarshalJSON(data []byte) error {
+	if err := json.Unmarshal(data, &c.Number); err == nil {
+		return nil
+	}
+	// A non-numeric code is not an error — it is the payouts API's shape.
+	return json.Unmarshal(data, &c.Text)
+}
+
+func (c flexibleCode) empty() bool { return c.Number == 0 && c.Text == "" }
+
+func (c flexibleCode) String() string {
+	if c.Text != "" {
+		return c.Text
+	}
+	return fmt.Sprintf("%d", c.Number)
 }
 
 func extractError(status int, body []byte) (parsed dlocalError, message string) {
@@ -49,8 +85,8 @@ func extractError(status int, body []byte) (parsed dlocalError, message string) 
 	if message == "" {
 		message = fmt.Sprintf("HTTP %d", status)
 	}
-	if parsed.Param != "" {
-		message += " (param: " + parsed.Param + ")"
+	if offender := parsed.offender(); offender != "" {
+		message += " (param: " + offender + ")"
 	}
 	return parsed, message
 }
@@ -60,15 +96,30 @@ func classifyHTTPError(status, maxRetries int, body []byte) *agenterrors.APIErro
 
 	var hints []string
 	switch {
-	case parsed.Code != 0:
-		hints = append(hints, fmt.Sprintf("dLocal code: %d", parsed.Code))
+	case !parsed.Code.empty():
+		hints = append(hints, "dLocal code: "+parsed.Code.String())
 	case parsed.StatusCode != "":
 		hints = append(hints, "dLocal code: "+parsed.StatusCode)
 	}
 
-	// Classify on the dLocal code where there is one — it is more precise than
-	// the HTTP status and does not always agree with it.
-	switch parsed.Code {
+	// The payouts API uses string codes for the same conditions payins numbers.
+	// Mapping them here keeps one classification table rather than two.
+	switch parsed.Code.Text {
+	case "authentication_failed":
+		return withHint(agenterrors.New("Signature rejected: "+message, agenterrors.FixableByHuman),
+			append(hints, "The payouts host verified the signature and rejected it — check the stored secret key")...)
+	case "invalid_credentials", "unauthorized_internal_url_restricted":
+		return withHint(agenterrors.New("Credentials rejected: "+message, agenterrors.FixableByHuman),
+			append(hints, "The payouts host rejected the caller outright. Check the credential covers the Payouts product, and that the path exists on this host")...)
+	}
+	if strings.HasSuffix(parsed.Code.Text, "_not_found") || strings.Contains(parsed.Code.Text, "not_found") {
+		return withHint(agenterrors.New("Not found: "+message, agenterrors.FixableByAgent),
+			append(hints, notFoundHint())...)
+	}
+
+	// Classify on the numeric payins code where there is one — it is more
+	// precise than the HTTP status and does not always agree with it.
+	switch parsed.Code.Number {
 	case codeSignatureMismatch:
 		return withHint(agenterrors.New("Signature rejected: "+message, agenterrors.FixableByHuman),
 			append(hints,
@@ -82,8 +133,8 @@ func classifyHTTPError(status, maxRetries int, body []byte) *agenterrors.APIErro
 
 	case codeInvalidParameter:
 		hint := "A required parameter or header was missing or malformed"
-		if parsed.Param != "" {
-			hint = fmt.Sprintf("dLocal rejected the %q parameter as missing or malformed", parsed.Param)
+		if offender := parsed.offender(); offender != "" {
+			hint = fmt.Sprintf("dLocal rejected the %q parameter as missing or malformed", offender)
 		}
 		return withHint(agenterrors.New(message, agenterrors.FixableByAgent), append(hints, hint)...)
 

@@ -120,15 +120,16 @@ func registerChargebacks(root *cobra.Command, globals shared.GlobalsFunc) {
 	root.AddCommand(group)
 }
 
-// registerPayouts targets a different host with a different signing scheme, so
-// it routes through the payouts client rather than the payins one.
+// registerPayouts targets a different HOST; the signing scheme is the same as
+// payins, confirmed against the live sandbox.
 func registerPayouts(root *cobra.Command, globals shared.GlobalsFunc) {
 	group := &cobra.Command{
 		Use:   "payouts",
 		Short: "Retrieve dLocal payouts",
 		Long: "Retrieve dLocal payouts.\n\n" +
-			"Payouts live on the marketplace-api host and are signed with the Payload-Signature " +
-			"scheme rather than the payins Authorization header. Both come from the same profile.",
+			"Payouts live on the marketplace-api host, using the same credentials and the same " +
+			"signing scheme as payins — only the host differs. Their error bodies do differ: " +
+			"codes are strings rather than numbers.",
 	}
 
 	group.AddCommand(&cobra.Command{

@@ -93,12 +93,41 @@ signature = hex_lower(HMAC_SHA256(secretKey, X-Login || X-Date || rawRequestBody
 
 For a GET the body is the empty string, so the signed message is `X-Login || X-Date`.
 
-### The payouts v2 signer
+### The payouts signer: there isn't one
 
-Same secret, same HMAC-SHA256, same lowercase hex — but the signature travels in a
-**`Payload-Signature`** header and covers the request payload. It is implemented as its **own
-signer type** rather than a flag on the payins signer, so neither can silently acquire the other's
-header set.
+> **Correction, from live testing.** This section originally specified a separate payouts signer
+> using a `Payload-Signature` header over the body alone, per
+> `https://docs.dlocal.com/docs/generate-signature`. Tested against the sandbox payouts host, that
+> scheme is **rejected**:
+>
+> | Sent to `marketplace-api.dlocal-sbox.com/v2/payouts/{id}` | Result |
+> |---|---|
+> | `Payload-Signature` = HMAC(body) | `401 invalid_credentials` |
+> | `Payload-Signature` = HMAC(login+date) | `401 invalid_credentials` |
+> | no signature header | `401 invalid_credentials` |
+> | `Authorization: V2-HMAC-SHA256` (payins) | `404 payout_not_found_id` — **auth passed** |
+> | `Authorization` with a corrupted digest | `403 authentication_failed` |
+>
+> The corrupted-digest control confirms the signature is genuinely verified rather than ignored.
+>
+> **Payouts therefore differ from payins by HOST ONLY.** `PayoutsSigner` is deleted. The `Signer`
+> interface survives because Payouts **v3** — OAuth2 bearer tokens instead of signatures — would be
+> a real second implementation. A test asserts no `Payload-Signature` header is ever sent, so the
+> documented-but-wrong scheme cannot be reinstated from the docs.
+
+### The payouts error shape differs
+
+The two APIs do not share an error contract, which matters because a struct typed for one silently
+fails to parse the other and loses the message:
+
+| | payins | payouts |
+|---|---|---|
+| `code` | number (`5000`) | **string** (`"payout_not_found_id"`) |
+| offending field key | `param` | **`field`** |
+| bad signature | `400` / `5000` | `403` / `authentication_failed` |
+| caller rejected | `403` / `3001` | `401` / `invalid_credentials` |
+
+The client decodes `code` leniently and accepts either field key.
 
 ### The sign-exactly-what-you-send constraint
 

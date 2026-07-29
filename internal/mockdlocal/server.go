@@ -102,8 +102,11 @@ func (s *Server) payins(next handlerFunc) http.Handler {
 	return s.authenticated(next, schemePayins)
 }
 
-// payouts wraps a handler with the Payload-Signature scheme, which hashes the
-// body ALONE rather than login+date+body.
+// payouts wraps a handler with the SAME scheme as payins. Verified against the
+// live sandbox: the payouts host rejects Payload-Signature with 401
+// invalid_credentials and accepts the payins Authorization header. Its
+// rejections use string codes rather than numeric ones, so it keeps its own
+// scheme constant to select the right error shape.
 func (s *Server) payouts(next handlerFunc) http.Handler {
 	return s.authenticated(next, schemePayouts)
 }
@@ -139,6 +142,10 @@ type authFailure struct {
 	code    int
 	message string
 	param   string
+	// textCode is the payouts API's string code. That API returns
+	// {"code":"authentication_failed"} where payins returns {"code":5000}, so
+	// the mock carries both shapes rather than pretending they agree.
+	textCode string
 }
 
 // verify returns nil when the request authenticates, or the rejection the real
@@ -152,23 +159,23 @@ func (s *Server) verify(r *http.Request, body []byte, sch scheme) *authFailure {
 	// 401. X-Version and User-Agent are documented as required but the API
 	// serves requests without them, so the mock does not demand them either.
 	if login == "" {
-		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "X-Login"}
+		return &authFailure{status: 400, code: codeInvalidParameter, message: "Invalid parameter", param: "X-Login"}
 	}
 	if r.Header.Get("X-Trans-Key") == "" {
-		return &authFailure{400, codeInvalidParameter, "Missing parameter(s) [or non valid values]. key", ""}
+		return &authFailure{status: 400, code: codeInvalidParameter, message: "Missing parameter(s) [or non valid values]. key"}
 	}
 	if date == "" {
-		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "X-Date"}
+		return &authFailure{status: 400, code: codeInvalidParameter, message: "Invalid parameter", param: "X-Date"}
 	}
 	if !isISO8601(date) {
-		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "X-Date"}
+		return &authFailure{status: 400, code: codeInvalidParameter, message: "Invalid parameter", param: "X-Date"}
 	}
 
 	// An unrecognized merchant is 403/3001 — the same response the real API
 	// gives a caller whose IP is not allowlisted, which is why that error
 	// cannot be used to tell those two causes apart.
 	if login != s.opts.Login || r.Header.Get("X-Trans-Key") != s.opts.TransKey {
-		return &authFailure{403, codeInvalidCredentials, "Invalid credentials", ""}
+		return &authFailure{status: 403, code: codeInvalidCredentials, message: "Invalid credentials"}
 	}
 
 	// NOTE: X-Date is deliberately NOT checked for staleness. The real sandbox
@@ -177,43 +184,34 @@ func (s *Server) verify(r *http.Request, body []byte, sch scheme) *authFailure {
 	// signature that validates. Enforcing a skew window here would make the
 	// mock stricter than the thing it stands in for.
 
-	if sch == schemePayouts {
-		return s.verifyPayoutsSignature(r, body)
-	}
-	return s.verifyPayinsSignature(r, body, login, date)
+	return s.verifyPayinsSignature(r, body, login, date, sch)
 }
 
-func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date string) *authFailure {
-	if r.Header.Get("Payload-Signature") != "" {
-		return &authFailure{400, codeInvalidParameter, "payins request carried a Payload-Signature header; that is the payouts scheme", "authorization"}
+func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date string, sch scheme) *authFailure {
+	// The payouts host answers a Payload-Signature request with 401
+	// invalid_credentials — it does not recognize that scheme at all.
+	if sch == schemePayouts && r.Header.Get("Payload-Signature") != "" && r.Header.Get("Authorization") == "" {
+		return &authFailure{status: 401, message: "invalid credentials", textCode: "invalid_credentials"}
 	}
 
 	header := r.Header.Get("Authorization")
 	if header == "" {
-		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "Authorization"}
+		if sch == schemePayouts {
+			return &authFailure{status: 401, message: "invalid credentials", textCode: "invalid_credentials"}
+		}
+		return &authFailure{status: 400, code: codeInvalidParameter, message: "Invalid parameter", param: "Authorization"}
 	}
 	if !strings.HasPrefix(header, authPrefix) {
-		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "authorization"}
+		return &authFailure{status: 400, code: codeInvalidParameter, message: "Invalid parameter", param: "authorization"}
 	}
 
 	want := sign(s.opts.SecretKey, []byte(login+date+string(body)))
 	if !hmac.Equal([]byte(strings.TrimPrefix(header, authPrefix)), []byte(want)) {
-		return &authFailure{400, codeSignatureMismatch, "Signature not match", ""}
-	}
-	return nil
-}
-
-func (s *Server) verifyPayoutsSignature(r *http.Request, body []byte) *authFailure {
-	if r.Header.Get("Authorization") != "" {
-		return &authFailure{400, codeInvalidParameter, "payouts request carried an Authorization header; that is the payins scheme", "payload-signature"}
-	}
-
-	header := r.Header.Get("Payload-Signature")
-	if header == "" {
-		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "Payload-Signature"}
-	}
-	if !hmac.Equal([]byte(header), []byte(sign(s.opts.SecretKey, body))) {
-		return &authFailure{400, codeSignatureMismatch, "Signature not match", ""}
+		// The two hosts report a bad signature differently.
+		if sch == schemePayouts {
+			return &authFailure{status: 403, message: "Authentication failed", textCode: "authentication_failed"}
+		}
+		return &authFailure{status: 400, code: codeSignatureMismatch, message: "Signature not match"}
 	}
 	return nil
 }
@@ -251,9 +249,15 @@ func writeErrorParam(w http.ResponseWriter, status, code int, message, param str
 }
 
 func writeFailure(w http.ResponseWriter, f *authFailure) {
-	payload := map[string]any{"code": f.code, "message": f.message}
-	if f.param != "" {
-		payload["param"] = f.param
+	payload := map[string]any{"message": f.message}
+	if f.textCode != "" {
+		payload["code"] = f.textCode
+		payload["field"] = f.param
+	} else {
+		payload["code"] = f.code
+		if f.param != "" {
+			payload["param"] = f.param
+		}
 	}
 	writeJSON(w, f.status, payload)
 }

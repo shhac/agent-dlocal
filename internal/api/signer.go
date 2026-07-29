@@ -79,31 +79,22 @@ func (s PayinsSigner) Apply(header http.Header, body []byte, now time.Time) {
 	header.Set("Authorization", "V2-HMAC-SHA256, Signature: "+hmacHex(s.Creds.SecretKey, message))
 }
 
-// PayoutsSigner implements the Payouts v2 scheme:
+// NOTE: there is no PayoutsSigner.
 //
-//	signature = hex_lower(HMAC_SHA256(secretKey, body))
+// An earlier version of this package had one, implementing the Payouts v2
+// scheme the documentation describes: HMAC over the body ALONE, carried in a
+// Payload-Signature header. Tested against the live sandbox, the payouts host
+// rejects that with 401 invalid_credentials and accepts the ordinary payins
+// Authorization header instead:
 //
-// carried in Payload-Signature. Note the message is the body ALONE — login and
-// date are not part of it, unlike payins.
+//	Payload-Signature = HMAC(body)            -> 401 invalid_credentials
+//	Payload-Signature = HMAC(login+date)      -> 401 invalid_credentials
+//	no signature header                       -> 401 invalid_credentials
+//	Authorization: V2-HMAC-SHA256 (payins)    -> 404 payout_not_found_id  <- auth passed
 //
-// For a GET the body is empty, so the digest is constant for a given secret.
-// That is what the documentation specifies; it is recorded here because it
-// looks like a bug and someone will otherwise "fix" it.
-type PayoutsSigner struct {
-	Creds     Credentials
-	UserAgent string
-}
-
-func (s PayoutsSigner) Name() string { return "Payload-Signature" }
-
-func (s PayoutsSigner) Apply(header http.Header, body []byte, now time.Time) {
-	header.Set("X-Login", s.Creds.Login)
-	header.Set("X-Trans-Key", s.Creds.TransKey)
-	header.Set("X-Date", FormatDate(now))
-	header.Set("X-Version", apiVersion)
-	header.Set("User-Agent", s.UserAgent)
-	header.Set("Content-Type", "application/json")
-	header.Set("Accept", "application/json")
-
-	header.Set("Payload-Signature", hmacHex(s.Creds.SecretKey, body))
-}
+// with a corrupted payins signature returning 403 authentication_failed, so the
+// signature is genuinely being verified rather than ignored.
+//
+// Payouts therefore differ from payins only by HOST, not by signing scheme. The
+// Signer interface is kept because Payouts v3 — which uses OAuth2 bearer tokens
+// rather than signatures — would be a genuine second implementation.

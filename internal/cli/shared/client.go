@@ -104,15 +104,17 @@ func WithClient(flags *GlobalFlags, fn func(context.Context, *api.Client) error)
 	return withClient(flags, resolved, baseURL(flags, resolved.Profile.BaseURL), signer, fn)
 }
 
-// WithPayoutsClient targets the payouts host. It is a separate service on a
-// separate domain with a different signing scheme, so it gets its own
-// constructor rather than a flag on the payins one.
+// WithPayoutsClient targets the payouts host. It differs from the payins client
+// by HOST ONLY — the signing scheme is identical, confirmed against the live
+// sandbox (see the note in internal/api/signer.go). It stays a separate
+// constructor because the base URL differs and because Payouts v3, which uses
+// OAuth2 rather than signatures, would plug in here.
 func WithPayoutsClient(flags *GlobalFlags, fn func(context.Context, *api.Client) error) error {
 	resolved, err := ResolveProfile(flags)
 	if err != nil {
 		return err
 	}
-	signer := api.PayoutsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
+	signer := api.PayinsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
 	return withClient(flags, resolved, baseURL(flags, resolved.Profile.PayoutsBaseURL), signer, fn)
 }
 

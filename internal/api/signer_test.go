@@ -53,44 +53,24 @@ func TestPayinsSignerSignsLoginDateBody(t *testing.T) {
 	}
 }
 
-// Payouts v2 hashes the payload ALONE. If someone "unifies" the two signers,
-// this is the test that fails.
-func TestPayoutsSignerSignsBodyOnly(t *testing.T) {
-	creds := Credentials{Login: docsLogin, TransKey: "j81xh5", SecretKey: docsSecret}
-	body := []byte(`{"amount":100}`)
-	now := time.Date(2022, 11, 24, 15, 42, 57, 130_000_000, time.UTC)
-
+// Payouts use the SAME signer as payins — only the host differs. Verified
+// against the live sandbox: the payouts host rejects Payload-Signature with
+// 401 invalid_credentials and accepts this Authorization header (404
+// payout_not_found_id, i.e. auth passed), while a corrupted signature gets
+// 403 authentication_failed.
+//
+// This test exists to stop a well-meaning reader reinstating a Payload-Signature
+// signer from the documentation.
+func TestNoPayloadSignatureHeaderIsEverSent(t *testing.T) {
 	header := http.Header{}
-	PayoutsSigner{Creds: creds, UserAgent: "agent-dlocal/test"}.Apply(header, body, now)
+	PayinsSigner{Creds: Credentials{Login: docsLogin, SecretKey: docsSecret}, UserAgent: "agent-dlocal/test"}.
+		Apply(header, []byte(`{"amount":100}`), time.Now())
 
-	if got, want := header.Get("Payload-Signature"), hmacHex(docsSecret, body); got != want {
-		t.Fatalf("Payload-Signature = %q, want %q (HMAC over the body alone)", got, want)
+	if header.Get("Payload-Signature") != "" {
+		t.Fatal("a Payload-Signature header was set; the payouts host rejects that scheme with 401")
 	}
-	if header.Get("Authorization") != "" {
-		t.Fatal("payouts signer set an Authorization header; that is the payins scheme")
-	}
-
-	payinsHeader := http.Header{}
-	PayinsSigner{Creds: creds, UserAgent: "agent-dlocal/test"}.Apply(payinsHeader, body, now)
-	if payinsHeader.Get("Payload-Signature") != "" {
-		t.Fatal("payins signer set a Payload-Signature header; that is the payouts scheme")
-	}
-}
-
-// The two schemes must not coincidentally agree — if they did, a signer mix-up
-// would be invisible in every other test.
-func TestSignersProduceDifferentDigests(t *testing.T) {
-	creds := Credentials{Login: docsLogin, TransKey: "j81xh5", SecretKey: docsSecret}
-	body := []byte(`{"amount":100}`)
-	now := time.Date(2022, 11, 24, 15, 42, 57, 130_000_000, time.UTC)
-
-	payins, payouts := http.Header{}, http.Header{}
-	PayinsSigner{Creds: creds}.Apply(payins, body, now)
-	PayoutsSigner{Creds: creds}.Apply(payouts, body, now)
-
-	payinsDigest := payins.Get("Authorization")[len("V2-HMAC-SHA256, Signature: "):]
-	if payinsDigest == payouts.Get("Payload-Signature") {
-		t.Fatal("payins and payouts digests are identical; the signed messages are supposed to differ")
+	if header.Get("Authorization") == "" {
+		t.Fatal("no Authorization header was set; that is the scheme both hosts accept")
 	}
 }
 

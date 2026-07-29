@@ -219,7 +219,12 @@ func handlePayout(w http.ResponseWriter, r *http.Request, _ []byte) {
 	id := r.PathValue("id")
 	sc, ok := scenarioFor(id, payoutScenarios)
 	if !ok {
-		writeError(w, http.StatusNotFound, codePaymentNotFound, "Payout not found")
+		// The payouts API uses string codes and a "field" key, unlike payins.
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"code":    "payout_not_found_id",
+			"message": "The payout with the specified payout ID was not found.",
+			"field":   "payout_id",
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
