@@ -12,9 +12,6 @@ import (
 	"github.com/shhac/lib-agent-cli/xdg"
 )
 
-// dLocal's API version header. Constant across every payins call.
-const APIVersion = "2.1"
-
 // Environment is a HOST distinction, not something derivable from a credential:
 // dLocal keys carry no live/sandbox prefix, so the profile records it explicitly.
 const (
@@ -82,12 +79,8 @@ func ConfigDir() string {
 	return xdg.ConfigDir("agent-dlocal")
 }
 
-func configPath() string {
-	return filepath.Join(ConfigDir(), "config.json")
-}
-
 func ConfigPath() string {
-	return configPath()
+	return filepath.Join(ConfigDir(), "config.json")
 }
 
 func Read() *Config {
@@ -96,7 +89,7 @@ func Read() *Config {
 	if cache != nil {
 		return cache
 	}
-	data, err := os.ReadFile(configPath())
+	data, err := os.ReadFile(ConfigPath())
 	if err != nil {
 		cache = defaultConfig()
 		return cache
@@ -128,7 +121,7 @@ func Write(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configPath(), append(data, '\n'), 0o644)
+	return os.WriteFile(ConfigPath(), append(data, '\n'), 0o644)
 }
 
 func defaultConfig() *Config {

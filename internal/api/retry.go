@@ -22,14 +22,24 @@ func shouldRetry(status, attempt, maxRetries int) bool {
 	return status == http.StatusTooManyRequests || status >= 500
 }
 
+// maxRetryDelay caps both the computed backoff and a server-supplied
+// Retry-After. Without it, --max-retries accepts any integer and the shift
+// below overflows int64 around attempt 36 — whose negative result used to fall
+// through a `base <= 0` guard into a ZERO-delay hot retry loop. A server could
+// also park the CLI for a day with Retry-After: 86400.
+const maxRetryDelay = 30 * time.Second
+
+// maxBackoffShift bounds the exponent before it can overflow.
+const maxBackoffShift = 16
+
 func retryDelay(retryAfter string, attempt int) time.Duration {
 	if parsed := retryAfterDelay(retryAfter); parsed > 0 {
-		return parsed
+		return min(parsed, maxRetryDelay)
 	}
-	base := retryBaseDelay * time.Duration(1<<attempt)
-	if base <= 0 {
-		return 0
+	if attempt > maxBackoffShift {
+		attempt = maxBackoffShift
 	}
+	base := min(retryBaseDelay*time.Duration(1<<attempt), maxRetryDelay)
 	return base + randomJitter(base/2)
 }
 

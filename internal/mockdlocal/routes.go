@@ -12,7 +12,7 @@ func Routes() []string {
 		"GET  /refunds/{id}                      refund record",
 		"GET  /chargebacks/{id}                  chargeback record (id must start with CHAR)",
 		"GET  /payments-methods?country=XX       enabled payment methods for a country",
-		"GET  /v2/payouts/{id}                   payout record (Payload-Signature scheme)",
+		"GET  /v2/payouts/{id}                   payout record (same Authorization scheme, string error codes)",
 		"",
 		"Payin id suffixes:  -paid -pending -rejected -cancelled -expired -refunded -chargeback",
 		"Payout id suffixes: -paid -pending -delivered -rejected -cancelled",

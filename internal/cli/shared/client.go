@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/shhac/agent-dlocal/internal/api"
 	"github.com/shhac/agent-dlocal/internal/config"
@@ -220,14 +221,11 @@ func GetRawItem(flags *GlobalFlags, host Host, path string, params url.Values) e
 }
 
 func joinMissing(missing []string) string {
-	out := ""
+	flags := make([]string, len(missing))
 	for i, name := range missing {
-		if i > 0 {
-			out += ", "
-		}
-		out += "--" + name
+		flags[i] = "--" + name
 	}
-	return out
+	return strings.Join(flags, ", ")
 }
 
 func firstNonEmpty(values ...string) string {

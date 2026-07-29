@@ -98,28 +98,30 @@ func (s *Server) routes() {
 
 type handlerFunc func(w http.ResponseWriter, r *http.Request, body []byte)
 
-// payins wraps a handler with the V2-HMAC-SHA256 (Authorization) scheme.
+// payins wraps a handler that reports rejections with numeric dLocal codes.
 func (s *Server) payins(next handlerFunc) http.Handler {
-	return s.authenticated(next, schemePayins)
+	return s.authenticated(next, numericCodes)
 }
 
-// payouts wraps a handler with the SAME scheme as payins. Verified against the
-// live sandbox: the payouts host rejects Payload-Signature with 401
-// invalid_credentials and accepts the payins Authorization header. Its
-// rejections use string codes rather than numeric ones, so it keeps its own
-// scheme constant to select the right error shape.
+// payouts wraps a handler that reports rejections the payouts way. The
+// SIGNATURE scheme is identical to payins — verified against the live sandbox,
+// which rejects Payload-Signature with 401 invalid_credentials and accepts the
+// ordinary Authorization header. Only the error spelling differs.
 func (s *Server) payouts(next handlerFunc) http.Handler {
-	return s.authenticated(next, schemePayouts)
+	return s.authenticated(next, stringCodes)
 }
 
-type scheme int
+// errorDialect selects how a rejection is spelled. It is NOT a signing scheme:
+// both hosts accept the same Authorization header. Payins answers with numeric
+// codes and a "param" key, payouts with string codes and "field".
+type errorDialect int
 
 const (
-	schemePayins scheme = iota
-	schemePayouts
+	numericCodes errorDialect = iota
+	stringCodes
 )
 
-func (s *Server) authenticated(next handlerFunc, sch scheme) http.Handler {
+func (s *Server) authenticated(next handlerFunc, sch errorDialect) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -152,7 +154,7 @@ type authFailure struct {
 // verify returns nil when the request authenticates, or the rejection the real
 // sandbox produces for that fault. Every status/code pair below was observed
 // against https://sandbox.dlocal.com rather than inferred from the docs.
-func (s *Server) verify(r *http.Request, body []byte, sch scheme) *authFailure {
+func (s *Server) verify(r *http.Request, body []byte, sch errorDialect) *authFailure {
 	login := r.Header.Get("X-Login")
 	date := r.Header.Get("X-Date")
 
@@ -188,16 +190,16 @@ func (s *Server) verify(r *http.Request, body []byte, sch scheme) *authFailure {
 	return s.verifyPayinsSignature(r, body, login, date, sch)
 }
 
-func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date string, sch scheme) *authFailure {
+func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date string, sch errorDialect) *authFailure {
 	// The payouts host answers a Payload-Signature request with 401
 	// invalid_credentials — it does not recognize that scheme at all.
-	if sch == schemePayouts && r.Header.Get("Payload-Signature") != "" && r.Header.Get("Authorization") == "" {
+	if sch == stringCodes && r.Header.Get("Payload-Signature") != "" && r.Header.Get("Authorization") == "" {
 		return &authFailure{status: 401, message: "invalid credentials", textCode: "invalid_credentials"}
 	}
 
 	header := r.Header.Get("Authorization")
 	if header == "" {
-		if sch == schemePayouts {
+		if sch == stringCodes {
 			return &authFailure{status: 401, message: "invalid credentials", textCode: "invalid_credentials"}
 		}
 		return &authFailure{status: 400, code: codeInvalidParameter, message: "Invalid parameter", param: "Authorization"}
@@ -209,7 +211,7 @@ func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date
 	want := sign(s.opts.SecretKey, []byte(login+date+string(body)))
 	if !hmac.Equal([]byte(strings.TrimPrefix(header, authPrefix)), []byte(want)) {
 		// The two hosts report a bad signature differently.
-		if sch == schemePayouts {
+		if sch == stringCodes {
 			return &authFailure{status: 403, message: "Authentication failed", textCode: "authentication_failed"}
 		}
 		return &authFailure{status: 400, code: codeSignatureMismatch, message: "Signature not match"}

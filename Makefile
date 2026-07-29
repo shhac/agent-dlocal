@@ -17,8 +17,10 @@ mock-dev:
 	DLOCAL_X_LOGIN=mocklogin DLOCAL_X_TRANS_KEY=mocktrans DLOCAL_SECRET_KEY=mocksecret \
 	GOCACHE=$(GOCACHE) go run ./cmd/agent-dlocal $(ARGS)
 
+# -race because ProbeCountries fans out a goroutine per country over a shared
+# results slice — the one place in the repo a data race could exist.
 test:
-	GOCACHE=$(GOCACHE) go test ./... -count=1
+	GOCACHE=$(GOCACHE) go test ./... -count=1 -race
 
 test-short:
 	GOCACHE=$(GOCACHE) go test ./... -count=1 -short

@@ -25,12 +25,30 @@ var payinScenarios = map[string]scenario{
 	"chargeback": {"PAID", "200", "The payment was paid"},
 }
 
+var refundScenarios = map[string]scenario{
+	"paid":      {"SUCCESS", "200", "The refund was paid"},
+	"pending":   {"PENDING", "100", "The refund is pending"},
+	"rejected":  {"REJECTED", "300", "The refund was rejected"},
+	"cancelled": {"CANCELLED", "400", "The refund was cancelled"},
+}
+
 var payoutScenarios = map[string]scenario{
 	"paid":      {"PAID", "200", "The payout was paid"},
 	"pending":   {"PENDING", "100", "The payout is pending"},
 	"delivered": {"DELIVERED", "500", "The payout is being processed by the beneficiary bank"},
 	"rejected":  {"REJECTED", "300", "The payout was rejected: invalid beneficiary bank account"},
 	"cancelled": {"CANCELLED", "400", "The payout was cancelled by the merchant"},
+}
+
+// scenarioSuffix names the matched scenario, for fixtures that cross-reference
+// another record (an order pointing at its payment).
+func scenarioSuffix(id string, table map[string]scenario) string {
+	for suffix := range table {
+		if strings.HasSuffix(id, "-"+suffix) {
+			return suffix
+		}
+	}
+	return ""
 }
 
 func scenarioFor(id string, table map[string]scenario) (scenario, bool) {
@@ -129,15 +147,14 @@ func handlePaymentStatus(w http.ResponseWriter, r *http.Request, _ []byte) {
 
 func handleOrder(w http.ResponseWriter, r *http.Request, _ []byte) {
 	orderID := r.PathValue("id")
-	suffix := orderID[strings.LastIndex(orderID, "-")+1:]
-	sc, ok := payinScenarios[suffix]
+	sc, ok := scenarioFor(orderID, payinScenarios)
 	if !ok {
 		writeError(w, http.StatusNotFound, codePaymentNotFound, "Payment not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"order_id":      orderID,
-		"payment_id":    "D-4-" + suffix,
+		"payment_id":    "D-4-" + scenarioSuffix(orderID, payinScenarios),
 		"currency":      "BRL",
 		"amount":        285,
 		"status":        sc.status,
@@ -149,12 +166,7 @@ func handleOrder(w http.ResponseWriter, r *http.Request, _ []byte) {
 
 func handleRefund(w http.ResponseWriter, r *http.Request, _ []byte) {
 	id := r.PathValue("id")
-	sc, ok := scenarioFor(id, map[string]scenario{
-		"paid":      {"SUCCESS", "200", "The refund was paid"},
-		"pending":   {"PENDING", "100", "The refund is pending"},
-		"rejected":  {"REJECTED", "300", "The refund was rejected"},
-		"cancelled": {"CANCELLED", "400", "The refund was cancelled"},
-	})
+	sc, ok := scenarioFor(id, refundScenarios)
 	if !ok {
 		writeError(w, http.StatusNotFound, codeRefundNotFound, "Refund not found")
 		return

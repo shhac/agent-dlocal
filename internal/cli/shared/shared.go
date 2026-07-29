@@ -130,9 +130,3 @@ func WriteDebug(fields map[string]any) {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(fields)
 }
-
-func AddString(values url.Values, key, value string) {
-	if value != "" {
-		values.Set(key, value)
-	}
-}
