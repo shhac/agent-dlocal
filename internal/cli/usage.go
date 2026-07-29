@@ -75,7 +75,7 @@ var payoutsUsage = domainUsage{
 	},
 	Notes: []string{
 		"DELIVERED is NOT final and NOT a failure: the money is in flight at the beneficiary's bank. Do not re-send on the strength of that status.",
-		"Payouts use a separate host and signing scheme, but the same profile credentials.",
+		"Payouts use a separate host but the same credentials and the same signing scheme as payins; their error codes are strings rather than numbers.",
 		"To get the status explained rather than reported, prefer 'investigate payout'.",
 	},
 }
