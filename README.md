@@ -101,9 +101,13 @@ Payouts: `PENDING` 100 · `PAID` 200 · `REJECTED` 300 · `CANCELLED` 400 · **`
 `DELIVERED` is not final and not a failure — the money is in flight at the beneficiary's bank. It is
 the status most often misread, so `investigate payout` calls it out explicitly.
 
-A 401 from dLocal is often **clock skew** rather than a bad secret: `X-Date` is part of the signed
-message, so a drifted system clock invalidates an otherwise-correct signature. The error hint says
-so.
+Read the dLocal `code`, not the HTTP status — they disagree. A bad signature is `400 {"code":5000}`
+on payins and `403 {"code":"authentication_failed"}` on payouts; there is no `401` on the payins
+paths at all. `403 {"code":3001}` is returned *before* the signature is checked, so it means the
+caller was rejected outright — usually an IP allowlist or a wrong-host profile.
+
+Clock skew is **not** a failure mode, despite `X-Date` being part of the signed message: the date is
+signed *and* sent, so a drifted clock stays self-consistent and validates.
 
 ## MCP
 

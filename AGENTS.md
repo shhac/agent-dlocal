@@ -30,9 +30,14 @@ patterns.
 - **Sign what you send.** The client serializes a body once into a `[]byte` that is both signed and
   sent. Do not add a path that marshals separately for signing — key ordering or whitespace drift
   produces intermittent 401s that look random.
-- **Do not unify the two signers.** Payins signs `login + date + body` into `Authorization`; payouts
-  v2 signs `body` alone into `Payload-Signature`. They hash different messages, not just different
-  headers.
+- **There is one signer, not two, and do not reintroduce a second.** The docs describe a separate
+  Payouts v2 scheme (`Payload-Signature` over the body alone); the real payouts host **rejects** it
+  with `401 invalid_credentials` and accepts the ordinary payins `Authorization` header. Payouts
+  differ by HOST only. `TestNoPayloadSignatureHeaderIsEverSent` guards this — see the evidence table
+  in `internal/api/signer.go`.
+- **Payins and payouts do not share an error contract.** payins returns numeric `code` with `param`;
+  payouts returns string `code` with `field`. Decode leniently; a struct typed for one loses the
+  other's message entirely.
 - **Do not add credential classification.** dLocal keys carry no live/sandbox marker, so inferring an
   environment from a key would be a fabrication. Environment is host metadata on the profile.
 
@@ -56,5 +61,9 @@ Update all of these, or the surfaces drift apart:
 - `design-docs/mock-dlocal.md` — the mock server's contract.
 
 Both record *why*, including the two places dLocal's real API contradicted the original brief
-(payouts v3 uses OAuth2, not `Payload-Signature`; payouts lives on a separate host). Consult the
-docs via Context7 (`/websites/dlocal`) before asserting anything new about the API.
+(payouts v3 uses OAuth2; payouts lives on a separate host), and the places live testing later
+contradicted the docs themselves — clock-skew enforcement and the payouts signing scheme.
+
+**dLocal's documentation has been wrong twice.** Consult it via Context7 (`/websites/dlocal`) for
+orientation, but verify anything load-bearing against the sandbox before encoding it in a hint, a
+mock, or a test. `agent-dlocal -p <sandbox-profile> api get <path>` is the cheapest way to check.
