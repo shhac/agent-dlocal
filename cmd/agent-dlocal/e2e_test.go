@@ -95,9 +95,9 @@ func TestRefundsAndChargebacksResolve(t *testing.T) {
 	}
 }
 
-// Payouts exercise the OTHER signing scheme against the same mock, so this
-// passing proves the Payload-Signature path works end to end.
-func TestPayoutsGetUsesThePayoutsSigner(t *testing.T) {
+// Payouts go to a different host with the same signer, so this proves the
+// payouts path works end to end.
+func TestPayoutsGetReachesThePayoutsHost(t *testing.T) {
 	out := runMockCLI(t, "payouts", "get", "P-1-delivered")
 
 	records := decodeLines(t, out)
@@ -106,17 +106,77 @@ func TestPayoutsGetUsesThePayoutsSigner(t *testing.T) {
 	}
 }
 
-func TestPaymentMethodsListRequiresCountry(t *testing.T) {
-	out := runMockCLIErr(t, "payment-methods", "list")
-	assertContains(t, out, "country", "fixable_by")
+// Countries are positional and repeatable, mirroring the multi-id `get`
+// contract: one record per country, in input order.
+func TestPaymentMethodsListIsMultiCountry(t *testing.T) {
+	out := runMockCLI(t, "payment-methods", "list", "PH", "BR", "VN")
 
-	ok := runMockCLI(t, "payment-methods", "list", "--country", "BR")
-	records := decodeLines(t, ok)
-	if len(records) != 2 {
-		t.Fatalf("expected 2 payment methods, got %d:\n%s", len(records), ok)
+	records := decodeLines(t, out)
+	if len(records) != 3 {
+		t.Fatalf("expected one record per country, got %d:\n%s", len(records), out)
+	}
+	for i, want := range []string{"PH", "BR", "VN"} {
+		if records[i]["country"] != want {
+			t.Fatalf("record %d country = %v, want %s — input order was not preserved", i, records[i]["country"], want)
+		}
+		if records[i]["count"] == nil {
+			t.Fatalf("record %d has no method count: %v", i, records[i])
+		}
 	}
 	// A payment method's name is a product, not PII, and must not be redacted.
-	assertContains(t, ok, "Smart Pix", "Credit Card")
+	assertContains(t, out, "Smart Pix", "Credit Card")
+}
+
+// With no argument it falls back to --country, then the profile's country, so
+// the common single-market case needs no argument at all.
+func TestPaymentMethodsListFallsBackToTheCountryFlag(t *testing.T) {
+	viaFlag := decodeLines(t, runMockCLI(t, "payment-methods", "list", "--country", "PH"))
+	if viaFlag[0]["country"] != "PH" {
+		t.Fatalf("--country was not honoured: %v", viaFlag[0])
+	}
+
+	// No country anywhere -> the profile default (BR).
+	viaProfile := decodeLines(t, runMockCLI(t, "payment-methods", "list"))
+	if viaProfile[0]["country"] != "BR" {
+		t.Fatalf("expected the profile default BR, got %v", viaProfile[0])
+	}
+}
+
+// An unsupported country among several must not lose the others.
+func TestPaymentMethodsListReportsPerCountryFailures(t *testing.T) {
+	out := runMockCLI(t, "payment-methods", "list", "PH", "ZZ", "BR")
+
+	records := decodeLines(t, out)
+	if len(records) != 3 {
+		t.Fatalf("expected 3 records, got %d:\n%s", len(records), out)
+	}
+	if records[1]["reason"] == nil {
+		t.Fatalf("the unsupported country should carry a reason: %v", records[1])
+	}
+	if records[2]["count"] == nil {
+		t.Fatalf("a failure in the middle aborted the run: %v", records[2])
+	}
+}
+
+// The discovery sweep takes positional candidates too.
+func TestPaymentMethodsCountriesProbes(t *testing.T) {
+	out := runMockCLI(t, "payment-methods", "countries", "PH", "ZZ", "BR")
+
+	records := decodeLines(t, out)
+	if len(records) != 3 {
+		t.Fatalf("expected 3 probe records, got %d:\n%s", len(records), out)
+	}
+	var supported, unsupported int
+	for _, r := range records {
+		if r["supported"] == true {
+			supported++
+		} else {
+			unsupported++
+		}
+	}
+	if supported != 2 || unsupported != 1 {
+		t.Fatalf("expected 2 supported and 1 not, got %d/%d:\n%s", supported, unsupported, out)
+	}
 }
 
 func TestInvestigatePaymentExplainsRejection(t *testing.T) {

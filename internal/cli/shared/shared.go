@@ -22,6 +22,17 @@ type GlobalFlags struct {
 	Profile    string
 	BaseURL    string
 	MaxRetries int
+	// Country overrides the profile's country for this invocation. Every
+	// country-taking command reads it, so switching market is one flag rather
+	// than a different spelling per command.
+	Country string
+}
+
+// ResolveCountry applies the precedence: an explicit argument, then --country,
+// then the profile's stored country. Commands that accept countries positionally
+// pass those first.
+func (g *GlobalFlags) ResolveCountry(explicit, profileCountry string) string {
+	return firstNonEmpty(explicit, g.Country, profileCountry)
 }
 
 type GlobalsFunc = func() *GlobalFlags

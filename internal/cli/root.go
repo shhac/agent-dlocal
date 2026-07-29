@@ -38,6 +38,7 @@ func newRootCmd(version string) *cobra.Command {
 	pf := root.PersistentFlags()
 	pf.StringVarP(&globals.Profile, "profile", "p", "", "dLocal profile alias (or AGENT_DLOCAL_PROFILE)")
 	pf.StringVar(&globals.BaseURL, "base-url", "", "dLocal API base URL override (or AGENT_DLOCAL_BASE_URL)")
+	pf.StringVar(&globals.Country, "country", "", "ISO 3166-1 alpha-2 country for this invocation, overriding the profile's")
 	pf.IntVar(&globals.MaxRetries, "max-retries", 2, "Maximum automatic retries for transient dLocal 429/5xx responses")
 	_ = pf.MarkHidden("base-url")
 

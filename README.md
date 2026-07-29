@@ -66,12 +66,35 @@ agent-dlocal orders get ORDER-10241              # merchant reference -> payment
 agent-dlocal refunds get REF-4471
 agent-dlocal chargebacks get CHAR42342
 agent-dlocal payouts get P-2-91bc
-agent-dlocal payment-methods list --country BR
+agent-dlocal payment-methods list PH VN TH       # several markets at once
 agent-dlocal payment-methods countries --supported  # which markets work at all
 agent-dlocal api get /payments/D-4-aaa           # GET-only escape hatch
 ```
 
 `agent-dlocal usage` prints the whole map; each group has its own `usage` too.
+
+## Working across countries
+
+`--country` is a global flag, so switching market is the same flag on every command that takes one:
+
+```
+agent-dlocal --country PH auth check
+agent-dlocal --country PH payment-methods list
+```
+
+`payment-methods` also takes countries positionally and repeatably, mirroring the multi-id `get`
+contract — one record per country, in input order:
+
+```
+$ agent-dlocal payment-methods list PH VN TH
+{"country":"PH","count":14,"payment_methods":[...]}
+{"country":"VN","count":14,"payment_methods":[...]}
+{"country":"TH","count":13,"payment_methods":[...]}
+```
+
+Precedence is **positional argument → `--country` → the profile's stored country**. A country the
+merchant is not enabled for becomes a record carrying `reason`, so asking about ten markets and
+having one fail still answers the other nine.
 
 ## Discovering markets
 

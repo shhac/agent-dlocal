@@ -68,12 +68,14 @@ agent-dlocal orders get <order_id>...            # merchant order -> payment
 agent-dlocal refunds get <refund_id>...
 agent-dlocal chargebacks get <chargeback_id>...
 agent-dlocal payouts get <payout_id>...
-agent-dlocal payment-methods list --country BR
+agent-dlocal payment-methods list [COUNTRY...]      # one record per country
 agent-dlocal payment-methods countries --supported  # which markets work at all
 agent-dlocal api get <path> [--query k=v] [--payouts]
 ```
 
-`get` takes multiple ids and returns one record per id in input order.
+`get` takes multiple ids and returns one record per id in input order; `payment-methods` takes
+countries the same way. `--country XX` is global — use it to switch market on any command that takes
+one, rather than looking for a per-command spelling.
 
 ## Reading a dLocal outcome
 

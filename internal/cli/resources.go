@@ -9,6 +9,7 @@ import (
 
 	"github.com/shhac/agent-dlocal/internal/api"
 	"github.com/shhac/agent-dlocal/internal/cli/shared"
+	"github.com/shhac/agent-dlocal/internal/config"
 )
 
 // Every command here is a GET. dLocal's read surface is retrieve-by-id, so the
@@ -149,44 +150,40 @@ func registerPayouts(root *cobra.Command, globals shared.GlobalsFunc) {
 	root.AddCommand(group)
 }
 
-// registerPaymentMethods is the one "list"-shaped command in the CLI, and it is
-// a per-country lookup rather than a paginated collection — hence a required
-// --country instead of the family's usual --limit/cursor flags.
+// registerPaymentMethods is the one "list"-shaped group in the CLI, and neither
+// subcommand is a paginated collection — dLocal has no list endpoints.
+//
+// Countries are POSITIONAL and repeatable, mirroring `get <id>...`: one record
+// per country in input order. A merchant operating across several markets asks
+// about them together far more often than one at a time, and making that the
+// default shape means the output is the same whether you pass one country or
+// ten.
 func registerPaymentMethods(root *cobra.Command, globals shared.GlobalsFunc) {
 	group := &cobra.Command{
 		Use:   "payment-methods",
 		Short: "Look up enabled payment methods by country",
 	}
 
-	var country string
 	list := &cobra.Command{
-		Use:   "list",
-		Short: "List the payment methods enabled for a country",
+		Use:   "list [COUNTRY...]",
+		Short: "List the payment methods enabled for one or more countries",
+		Long: "List the payment methods enabled for each country given.\n\n" +
+			"With no argument, uses --country, then the profile's country.\n" +
+			"Emits one record per country, in the order given.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := globals()
-			if err := shared.RequireFlag("country", country, "Pass an ISO 3166-1 alpha-2 code, e.g. --country BR"); err != nil {
-				return err
-			}
-			return shared.WithClient(flags, func(ctx context.Context, client *api.Client) error {
-				item, err := shared.FetchItem(ctx, client, flags, "/payments-methods", url.Values{"country": {country}})
-				if err != nil {
-					return err
+			return shared.WithResolvedProfile(flags, func(ctx context.Context, client *api.Client, profile config.Profile) error {
+				countries := args
+				if len(countries) == 0 {
+					countries = []string{flags.ResolveCountry("", profile.Country)}
 				}
-				methods, ok := item.([]any)
-				if !ok {
-					shared.WriteItem(item, flags.Format)
-					return nil
-				}
-				shared.WriteList(methods, flags.Format)
-				return nil
+				return shared.ListPaymentMethods(ctx, client, flags, countries)
 			})
 		},
 	}
-	list.Flags().StringVar(&country, "country", "", "ISO 3166-1 alpha-2 country code (required)")
 	group.AddCommand(list)
 
 	registerCountryDiscovery(group, globals)
-
 	registerDomainUsage(group, "payment-methods", paymentMethodsUsage)
 	root.AddCommand(group)
 }
@@ -202,18 +199,17 @@ func registerPaymentMethods(root *cobra.Command, globals shared.GlobalsFunc) {
 func registerCountryDiscovery(group *cobra.Command, globals shared.GlobalsFunc) {
 	var concurrency int
 	var supportedOnly bool
-	var countries []string
 
 	cmd := &cobra.Command{
-		Use:   "countries",
+		Use:   "countries [COUNTRY...]",
 		Short: "Discover which countries this merchant is enabled for",
 		Long: "Probe each of dLocal's markets and report which resolve for these credentials.\n\n" +
 			"dLocal has no list-countries endpoint, so this issues one GET per country " +
 			"(" + itoa(len(api.Markets)) + " by default) and reports the outcome of each. " +
-			"Use --country to probe a specific set instead, including codes not on the built-in list.",
+			"Pass country codes to probe a specific set instead, including codes not on the built-in list.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := globals()
-			targets := countries
+			targets := args
 			if len(targets) == 0 {
 				targets = api.Markets
 			}
@@ -235,7 +231,6 @@ func registerCountryDiscovery(group *cobra.Command, globals shared.GlobalsFunc) 
 	}
 	cmd.Flags().IntVar(&concurrency, "concurrency", 8, "Parallel probes in flight")
 	cmd.Flags().BoolVar(&supportedOnly, "supported", false, "Emit only the countries that resolved")
-	cmd.Flags().StringSliceVar(&countries, "country", nil, "Probe these codes instead of the built-in market list (repeatable)")
 	group.AddCommand(cmd)
 }
 

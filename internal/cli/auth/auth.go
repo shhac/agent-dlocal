@@ -185,8 +185,6 @@ func fillFromStored(alias string, set credential.Set) credential.Set {
 // cheapest authenticated read and proves login, trans-key, secret, clock skew
 // and signature construction are all correct in one round trip.
 func registerCheck(parent *cobra.Command, globals shared.GlobalsFunc) {
-	var country string
-
 	cmd := &cobra.Command{
 		Use:   "check [profile]",
 		Short: "Verify stored credentials with one authenticated read",
@@ -202,10 +200,9 @@ func registerCheck(parent *cobra.Command, globals shared.GlobalsFunc) {
 				return err
 			}
 
-			lookupCountry := country
-			if lookupCountry == "" {
-				lookupCountry = resolved.Profile.Country
-			}
+			// The global --country wins over the profile's stored one, so probing
+			// a different market is the same flag here as everywhere else.
+			lookupCountry := flags.ResolveCountry("", resolved.Profile.Country)
 
 			return shared.WithResolvedClient(flags, resolved, func(ctx context.Context, client *api.Client) error {
 				methods, err := shared.FetchItem(ctx, client, flags, "/payments-methods", url.Values{"country": {lookupCountry}})
@@ -227,7 +224,6 @@ func registerCheck(parent *cobra.Command, globals shared.GlobalsFunc) {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&country, "country", "", "Country to probe (defaults to the profile's country)")
 	parent.AddCommand(cmd)
 }
 

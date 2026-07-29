@@ -84,12 +84,13 @@ var paymentMethodsUsage = domainUsage{
 	Domain:  "payment-methods",
 	Summary: "Look up which payment methods a country supports.",
 	Commands: []usageEntry{
-		{Command: "agent-dlocal payment-methods list --country BR", Answers: "Which methods are enabled for this country?"},
+		{Command: "agent-dlocal payment-methods list PH VN TH", Answers: "Which methods are enabled in these countries?", Note: "Countries are positional and repeatable; one record per country in input order. With none, falls back to --country then the profile's country."},
 		{Command: "agent-dlocal payment-methods countries --supported", Answers: "Which countries can this merchant take money in at all?", Note: "dLocal has no list-countries endpoint, so this probes each market — one request per country."},
 	},
 	Notes: []string{
 		"These are the only list-shaped commands in the CLI, and neither is a paginated collection — dLocal has no list endpoints.",
 		"Country codes are ISO 3166-1 alpha-2. dLocal does NOT support Singapore, South Korea, Taiwan, Hong Kong, Venezuela, or western Europe.",
+		"--country is a GLOBAL flag: use it to switch market on any command that takes one.",
 	},
 }
 

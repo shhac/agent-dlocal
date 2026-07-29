@@ -212,3 +212,17 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// WithResolvedProfile is WithClient plus the resolved profile, for commands
+// whose behaviour depends on non-secret profile metadata (currently the
+// default country).
+func WithResolvedProfile(flags *GlobalFlags, fn func(context.Context, *api.Client, config.Profile) error) error {
+	resolved, err := ResolveProfile(flags)
+	if err != nil {
+		return err
+	}
+	signer := api.PayinsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
+	return withClient(flags, resolved, baseURL(flags, resolved.Profile.BaseURL), signer, func(ctx context.Context, client *api.Client) error {
+		return fn(ctx, client, resolved.Profile)
+	})
+}

@@ -2,11 +2,13 @@ package shared
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"sort"
 	"sync"
 
 	"github.com/shhac/agent-dlocal/internal/api"
+	"github.com/shhac/agent-dlocal/internal/output"
 )
 
 // CountryProbe is one country's result from a discovery sweep.
@@ -69,4 +71,31 @@ func SortProbes(probes []CountryProbe) {
 		}
 		return probes[i].Country < probes[j].Country
 	})
+}
+
+// ListPaymentMethods emits one record per country, in input order — the same
+// contract as a multi-id `get`. A country that dLocal rejects becomes an
+// unsupported record rather than aborting the run, so asking about ten markets
+// and having one fail still answers the other nine.
+func ListPaymentMethods(ctx context.Context, client *api.Client, flags *GlobalFlags, countries []string) error {
+	items := make([]any, 0, len(countries))
+	for _, country := range countries {
+		raw, err := client.Get(ctx, "/payments-methods", url.Values{"country": {country}})
+		if err != nil {
+			items = append(items, CountryProbe{Country: country, Reason: err.Error()})
+			continue
+		}
+		var methods any
+		if err := json.Unmarshal(raw, &methods); err != nil {
+			items = append(items, CountryProbe{Country: country, Reason: err.Error()})
+			continue
+		}
+		items = append(items, map[string]any{
+			"country":         country,
+			"count":           countJSONArray(raw),
+			"payment_methods": output.Redact(methods, RedactionOptions(flags)),
+		})
+	}
+	WriteList(items, flags.Format)
+	return nil
 }
