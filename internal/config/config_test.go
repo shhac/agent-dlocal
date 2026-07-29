@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -104,5 +105,59 @@ func TestSetDefaultValueRejectsUnknownKey(t *testing.T) {
 	}
 	if got := Read().Defaults.MaxRetries; got == nil || *got != 5 {
 		t.Fatalf("MaxRetries = %v, want 5", got)
+	}
+}
+
+// A failed write and an unknown key are different problems with different
+// fixes. They used to be indistinguishable, so the CLI reported disk failures
+// as "unknown config key" — naming a key that was in fact valid.
+func TestUnknownKeyIsASentinelDistinctFromWriteFailures(t *testing.T) {
+	SetConfigDir(t.TempDir())
+	t.Cleanup(func() { SetConfigDir("") })
+
+	if err := SetDefaultValue("nonsense", 1); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("SetDefaultValue with a bad key: err = %v, want ErrUnknownKey", err)
+	}
+	if err := UnsetDefaultValue("nonsense"); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("UnsetDefaultValue with a bad key: err = %v, want ErrUnknownKey", err)
+	}
+	if _, err := ReadDefaultValue("nonsense"); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("ReadDefaultValue with a bad key: err = %v, want ErrUnknownKey", err)
+	}
+
+	// A write failure must NOT masquerade as an unknown key.
+	SetConfigDir("/proc/nonexistent-agent-dlocal-test")
+	err := SetDefaultValue("max_retries", 5)
+	if err == nil {
+		t.Fatal("expected a write failure against an unwritable directory")
+	}
+	if errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("a write failure was reported as an unknown key: %v", err)
+	}
+}
+
+// The key set has one definition; get/set/unset and the CLI's hint all read it.
+func TestDefaultKeysCoversEveryAccessor(t *testing.T) {
+	SetConfigDir(t.TempDir())
+	t.Cleanup(func() { SetConfigDir("") })
+
+	keys := DefaultKeys()
+	if len(keys) != len(defaultAccessors) {
+		t.Fatalf("DefaultKeys returned %d keys for %d accessors", len(keys), len(defaultAccessors))
+	}
+	for _, key := range keys {
+		if err := SetDefaultValue(key, 7); err != nil {
+			t.Fatalf("SetDefaultValue(%q): %v", key, err)
+		}
+		got, err := ReadDefaultValue(key)
+		if err != nil || got == nil || *got != 7 {
+			t.Fatalf("ReadDefaultValue(%q) = %v, %v; want 7", key, got, err)
+		}
+		if err := UnsetDefaultValue(key); err != nil {
+			t.Fatalf("UnsetDefaultValue(%q): %v", key, err)
+		}
+		if got, _ := ReadDefaultValue(key); got != nil {
+			t.Fatalf("ReadDefaultValue(%q) after unset = %v, want nil", key, got)
+		}
 	}
 }

@@ -2,9 +2,11 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/shhac/lib-agent-cli/xdg"
@@ -116,8 +118,10 @@ func Write(cfg *Config) error {
 	cache = nil
 	cacheMu.Unlock()
 
+	// 0700: this directory is shared with credentials.json, which holds real
+	// secrets whenever the keychain is unavailable.
 	dir := ConfigDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -212,32 +216,65 @@ func UpdateProfile(alias string, update func(Profile) Profile) error {
 	return Write(cfg)
 }
 
-func SetDefaultValue(key string, value int) error {
-	cfg := Read()
-	switch key {
-	case "timeout_ms":
-		cfg.Defaults.TimeoutMS = intPtr(value)
-	case "max_retries":
-		cfg.Defaults.MaxRetries = intPtr(value)
-	default:
-		return fmt.Errorf("unknown config key %q", key)
+// defaultAccessors is the single definition of the settable config keys.
+//
+// This used to be four parallel switches across two packages — get, set, unset,
+// and a bare name list — so adding a key meant four coordinated edits and
+// forgetting one failed silently rather than at compile time.
+var defaultAccessors = map[string]struct {
+	get func(Defaults) *int
+	set func(*Defaults, *int)
+}{
+	"timeout_ms": {
+		get: func(d Defaults) *int { return d.TimeoutMS },
+		set: func(d *Defaults, v *int) { d.TimeoutMS = v },
+	},
+	"max_retries": {
+		get: func(d Defaults) *int { return d.MaxRetries },
+		set: func(d *Defaults, v *int) { d.MaxRetries = v },
+	},
+}
+
+// ErrUnknownKey is returned for a key that is not settable. It is a sentinel so
+// callers can tell an unknown key from a failed write with errors.Is, rather
+// than reporting every failure as "unknown key" — which is what the CLI did
+// while both came back as anonymous errors.
+var ErrUnknownKey = errors.New("unknown config key")
+
+// DefaultKeys lists the settable keys in a stable order, so the CLI can render
+// them in hints without restating the set.
+func DefaultKeys() []string {
+	keys := make([]string, 0, len(defaultAccessors))
+	for key := range defaultAccessors {
+		keys = append(keys, key)
 	}
-	return Write(cfg)
+	sort.Strings(keys)
+	return keys
+}
+
+// ReadDefaultValue returns the stored value for key, or nil when unset.
+func ReadDefaultValue(key string) (*int, error) {
+	accessor, ok := defaultAccessors[key]
+	if !ok {
+		return nil, fmt.Errorf("%w %q", ErrUnknownKey, key)
+	}
+	return accessor.get(Read().Defaults), nil
+}
+
+func SetDefaultValue(key string, value int) error {
+	return writeDefault(key, &value)
 }
 
 func UnsetDefaultValue(key string) error {
-	cfg := Read()
-	switch key {
-	case "timeout_ms":
-		cfg.Defaults.TimeoutMS = nil
-	case "max_retries":
-		cfg.Defaults.MaxRetries = nil
-	default:
-		return fmt.Errorf("unknown config key %q", key)
-	}
-	return Write(cfg)
+	return writeDefault(key, nil)
 }
 
-func intPtr(value int) *int {
-	return &value
+func writeDefault(key string, value *int) error {
+	accessor, ok := defaultAccessors[key]
+	if !ok {
+		return fmt.Errorf("%w %q", ErrUnknownKey, key)
+	}
+	cfg := Read()
+	accessor.set(&cfg.Defaults, value)
+	return Write(cfg)
 }

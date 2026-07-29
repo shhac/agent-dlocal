@@ -93,8 +93,19 @@ func readIndex() (map[string]credentialEntry, error) {
 }
 
 func writeIndex(index map[string]credentialEntry) error {
+	// 0700, not 0755: on the fallback path this directory holds credentials.json
+	// with real secrets in it, and a 0600 file inside a world-readable directory
+	// still leaks its existence and size. lib-agent-cli's creds.Store uses 0700
+	// for the same reason.
+	//
+	// Chmod as well as MkdirAll, because the directory is usually created first
+	// by config.Write and MkdirAll will not tighten one that already exists —
+	// including one left 0755 by an earlier version.
 	dir := config.ConfigDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(index, "", "  ")
@@ -125,6 +136,13 @@ func Store(name string, set Set) (string, error) {
 		entry.Blob = keychainSentinel
 		entry.KeychainManaged = true
 		storage = "keychain"
+	} else {
+		// The keychain refused, so this write lands in the file index. Any
+		// item a PREVIOUS store left in the keychain still holds the old
+		// secrets, and once the index says file-backed nothing will ever
+		// delete it — Remove only clears what the index claims. Clear it here
+		// so a backend transition cannot strand a live credential.
+		_ = keychain.Delete(name)
 	}
 
 	index[name] = entry
@@ -186,10 +204,12 @@ func Remove(name string) error {
 		return &NotFoundError{Name: name}
 	}
 
-	if entry.KeychainManaged {
-		if err := keychain.Delete(name); err != nil {
-			return err
-		}
+	// Delete unconditionally rather than only when the index claims the
+	// keychain owns this profile: the index can be wrong in the safe-to-fix
+	// direction (a keychain item from an earlier store), and an extra delete of
+	// something absent is a no-op.
+	if err := keychain.Delete(name); err != nil && entry.KeychainManaged {
+		return err
 	}
 
 	delete(index, name)

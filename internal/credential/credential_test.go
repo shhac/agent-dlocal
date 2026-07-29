@@ -217,3 +217,78 @@ func keysOf(m map[string]string) []string {
 	}
 	return out
 }
+
+// Re-storing a profile while the keychain is unavailable must not strand the
+// previous keychain item. Without this, the index flips to file-backed, Remove
+// only deletes keychain items it believes it owns, and the OLD secrets survive
+// `auth remove` indefinitely — directly contradicting this package's stated
+// one-item-one-delete guarantee.
+func TestReStoreIntoFileBackendClearsTheOldKeychainItem(t *testing.T) {
+	kc := withTestEnv(t)
+
+	if _, err := Store("prod", sampleSet()); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if len(kc.items) != 1 {
+		t.Fatalf("expected the first Store to use the keychain, got %d items", len(kc.items))
+	}
+
+	kc.failStore = true
+	rotated := Set{Login: "l2", TransKey: "t2", SecretKey: "s2"}
+	if _, err := Store("prod", rotated); err != nil {
+		t.Fatalf("Store after keychain became unavailable: %v", err)
+	}
+
+	if len(kc.items) != 0 {
+		t.Fatalf("the previous keychain item survived a file-backed re-store, still holding the old secrets: %v", kc.items)
+	}
+	got, err := Get("prod")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != rotated {
+		t.Fatalf("Get returned %+v, want the rotated set", got)
+	}
+}
+
+// Remove must clear a keychain item even when the index says the credential is
+// file-backed — otherwise a backend transition leaves a secret nothing will
+// ever delete.
+func TestRemoveClearsAKeychainItemTheIndexNoLongerClaims(t *testing.T) {
+	kc := withTestEnv(t)
+
+	if _, err := Store("prod", sampleSet()); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	kc.failStore = true
+	if _, err := Store("prod", Set{Login: "l2", TransKey: "t2", SecretKey: "s2"}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	if err := Remove("prod"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if len(kc.items) != 0 {
+		t.Fatalf("Remove left %d keychain item(s) behind: %v", len(kc.items), kc.items)
+	}
+}
+
+// The directory holds credentials.json, which contains real secrets whenever
+// the keychain is unavailable. A 0600 file inside a 0755 directory is still a
+// worse posture than it looks.
+func TestConfigDirIsOwnerOnly(t *testing.T) {
+	kc := withTestEnv(t)
+	kc.failStore = true
+
+	if _, err := Store("prod", sampleSet()); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	info, err := os.Stat(config.ConfigDir())
+	if err != nil {
+		t.Fatalf("stat config dir: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("config dir mode = %o, want 700", perm)
+	}
+}

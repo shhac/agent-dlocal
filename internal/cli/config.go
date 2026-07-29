@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -9,11 +11,6 @@ import (
 	"github.com/shhac/agent-dlocal/internal/config"
 	agenterrors "github.com/shhac/agent-dlocal/internal/errors"
 )
-
-// configKeys are the non-secret global defaults. Credentials are never
-// reachable from this group — they live in the credential backend and have no
-// config representation at all.
-var configKeys = []string{"timeout_ms", "max_retries"}
 
 func registerConfig(root *cobra.Command, globals shared.GlobalsFunc) {
 	cmd := &cobra.Command{
@@ -65,10 +62,10 @@ func registerConfig(root *cobra.Command, globals shared.GlobalsFunc) {
 				value, err := strconv.Atoi(args[1])
 				if err != nil {
 					return agenterrors.Newf(agenterrors.FixableByAgent, "%q is not an integer", args[1]).
-						WithHint("Both " + joinKeys() + " take integers")
+						WithHint("Both " + strings.Join(config.DefaultKeys(), ", ") + " take integers")
 				}
 				if err := config.SetDefaultValue(args[0], value); err != nil {
-					return unknownKeyError(args[0])
+					return configError(err, args[0])
 				}
 				shared.WriteItem(map[string]any{"status": "set", "key": args[0], "value": value}, globals().Format)
 				return nil
@@ -80,7 +77,7 @@ func registerConfig(root *cobra.Command, globals shared.GlobalsFunc) {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if err := config.UnsetDefaultValue(args[0]); err != nil {
-					return unknownKeyError(args[0])
+					return configError(err, args[0])
 				}
 				shared.WriteItem(map[string]any{"status": "unset", "key": args[0]}, globals().Format)
 				return nil
@@ -92,41 +89,29 @@ func registerConfig(root *cobra.Command, globals shared.GlobalsFunc) {
 }
 
 func readConfigKey(key string) (any, error) {
-	defaults := config.Read().Defaults
-	switch key {
-	case "timeout_ms":
-		return derefInt(defaults.TimeoutMS), nil
-	case "max_retries":
-		return derefInt(defaults.MaxRetries), nil
-	default:
-		return nil, unknownKeyError(key)
+	value, err := config.ReadDefaultValue(key)
+	if err != nil {
+		return nil, configError(err, key)
 	}
-}
-
-func derefInt(value *int) any {
 	if value == nil {
-		return nil
+		return nil, nil
 	}
-	return *value
+	return *value, nil
 }
 
-// unknownKeyError replaces config's plain error with the structured contract,
-// so a bad key reaches the agent as a fixable_by:agent hint listing the valid
-// ones rather than as an opaque string.
-func unknownKeyError(key string) error {
-	return agenterrors.Newf(agenterrors.FixableByAgent, "unknown config key %q", key).
-		WithHint("Valid keys: " + joinKeys())
-}
-
-func joinKeys() string {
-	out := ""
-	for i, key := range configKeys {
-		if i > 0 {
-			out += ", "
-		}
-		out += key
+// configError translates a config-package error into the structured contract.
+//
+// An unknown key is the agent's to fix and gets the valid-key list; anything
+// else is a real failure — a failed write, a permissions problem — and must
+// surface as itself. Reporting every failure as "unknown key" told the user to
+// correct a key that was already correct.
+func configError(err error, key string) error {
+	if errors.Is(err, config.ErrUnknownKey) {
+		return agenterrors.Newf(agenterrors.FixableByAgent, "unknown config key %q", key).
+			WithHint("Valid keys: " + strings.Join(config.DefaultKeys(), ", "))
 	}
-	return out
+	return agenterrors.Wrap(err, agenterrors.FixableByHuman).
+		WithHint("Could not write " + config.ConfigPath() + "; check the path is writable")
 }
 
 func profileNames(cfg *config.Config) []string {
