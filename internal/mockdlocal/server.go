@@ -22,19 +22,26 @@ const (
 	DefaultLogin     = "mocklogin"
 	DefaultTransKey  = "mocktrans"
 	DefaultSecretKey = "mocksecret"
-	DefaultMaxSkew   = 5 * time.Minute
 
 	authPrefix = "V2-HMAC-SHA256, Signature: "
+)
+
+// dLocal error codes, observed against the live sandbox. Kept here rather than
+// imported from internal/api so the mock stays an independent statement of what
+// the API does — if the two ever disagree, a test fails instead of both moving
+// together.
+const (
+	codeInvalidCredentials = 3001 // 403
+	codePaymentNotFound    = 4000 // 404, also used for orders and chargebacks
+	codeRefundNotFound     = 4001 // 404
+	codeSignatureMismatch  = 5000 // 400 — note: NOT a 401
+	codeInvalidParameter   = 5001 // 400
 )
 
 type Options struct {
 	Login     string
 	TransKey  string
 	SecretKey string
-	// MaxSkew bounds how far X-Date may sit from now. The real API enforces a
-	// window, and reproducing it here is what makes the CLI's clock-skew hint
-	// testable rather than aspirational.
-	MaxSkew time.Duration
 }
 
 type Server struct {
@@ -56,10 +63,6 @@ func NewServerWithOptions(opts Options) http.Handler {
 	if opts.SecretKey == "" {
 		opts.SecretKey = DefaultSecretKey
 	}
-	if opts.MaxSkew == 0 {
-		opts.MaxSkew = DefaultMaxSkew
-	}
-
 	s := &Server{opts: opts, mux: http.NewServeMux()}
 	s.routes()
 	return s
@@ -84,8 +87,11 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /payments-methods", s.payins(handlePaymentMethods))
 	s.mux.Handle("GET /v2/payouts/{id}", s.payouts(handlePayout))
 
+	// An unrouted path returns the bare string NOT_FOUND, not JSON — matching
+	// the real API, and exercising the client's non-JSON error path.
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotFound, 404, "Route "+r.Method+" "+r.URL.Path+" is not mocked")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("NOT_FOUND"))
 	})
 }
 
@@ -117,45 +123,59 @@ func (s *Server) authenticated(next handlerFunc, sch scheme) http.Handler {
 			return
 		}
 
-		if failure := s.verify(r, body, sch); failure != "" {
-			writeError(w, http.StatusUnauthorized, 401, failure)
+		if failure := s.verify(r, body, sch); failure != nil {
+			writeFailure(w, failure)
 			return
 		}
 		next(w, r, body)
 	})
 }
 
-// verify returns an empty string when the request authenticates, or a message
-// naming exactly what is wrong. The mock's errors are a teaching tool: "missing
-// header" and "signature mismatch" call for completely different fixes, so it
-// never collapses them into a generic 401.
-func (s *Server) verify(r *http.Request, body []byte, sch scheme) string {
+// authFailure is a rejection expressed the way the real API expresses it:
+// an HTTP status plus a dLocal code, which do not always agree (a bad signature
+// is 400/5000, not a 401).
+type authFailure struct {
+	status  int
+	code    int
+	message string
+	param   string
+}
+
+// verify returns nil when the request authenticates, or the rejection the real
+// sandbox produces for that fault. Every status/code pair below was observed
+// against https://sandbox.dlocal.com rather than inferred from the docs.
+func (s *Server) verify(r *http.Request, body []byte, sch scheme) *authFailure {
 	login := r.Header.Get("X-Login")
-	transKey := r.Header.Get("X-Trans-Key")
 	date := r.Header.Get("X-Date")
 
-	for name, value := range map[string]string{"X-Login": login, "X-Trans-Key": transKey, "X-Date": date} {
-		if value == "" {
-			return "missing required header " + name
-		}
+	// A missing header is a 400 "Invalid parameter" naming the header — NOT a
+	// 401. X-Version and User-Agent are documented as required but the API
+	// serves requests without them, so the mock does not demand them either.
+	if login == "" {
+		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "X-Login"}
+	}
+	if r.Header.Get("X-Trans-Key") == "" {
+		return &authFailure{400, codeInvalidParameter, "Missing parameter(s) [or non valid values]. key", ""}
+	}
+	if date == "" {
+		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "X-Date"}
+	}
+	if !isISO8601(date) {
+		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "X-Date"}
 	}
 
-	if login != s.opts.Login {
-		return "unknown X-Login"
-	}
-	if transKey != s.opts.TransKey {
-		return "unknown X-Trans-Key"
+	// An unrecognized merchant is 403/3001 — the same response the real API
+	// gives a caller whose IP is not allowlisted, which is why that error
+	// cannot be used to tell those two causes apart.
+	if login != s.opts.Login || r.Header.Get("X-Trans-Key") != s.opts.TransKey {
+		return &authFailure{403, codeInvalidCredentials, "Invalid credentials", ""}
 	}
 
-	parsed, err := time.Parse("2006-01-02T15:04:05.000Z07:00", date)
-	if err != nil {
-		if parsed, err = time.Parse(time.RFC3339, date); err != nil {
-			return "X-Date is not an ISO-8601 datetime with timezone: " + date
-		}
-	}
-	if skew := time.Since(parsed); skew > s.opts.MaxSkew || skew < -s.opts.MaxSkew {
-		return "X-Date is outside the accepted clock-skew window (clock skew)"
-	}
+	// NOTE: X-Date is deliberately NOT checked for staleness. The real sandbox
+	// accepts a date a year old or a month in the future, because the date is
+	// signed as well as sent: a drifted clock produces a self-consistent
+	// signature that validates. Enforcing a skew window here would make the
+	// mock stricter than the thing it stands in for.
 
 	if sch == schemePayouts {
 		return s.verifyPayoutsSignature(r, body)
@@ -163,39 +183,49 @@ func (s *Server) verify(r *http.Request, body []byte, sch scheme) string {
 	return s.verifyPayinsSignature(r, body, login, date)
 }
 
-func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date string) string {
+func (s *Server) verifyPayinsSignature(r *http.Request, body []byte, login, date string) *authFailure {
 	if r.Header.Get("Payload-Signature") != "" {
-		return "payins request carried a Payload-Signature header; that is the payouts scheme"
+		return &authFailure{400, codeInvalidParameter, "payins request carried a Payload-Signature header; that is the payouts scheme", "authorization"}
 	}
 
 	header := r.Header.Get("Authorization")
 	if header == "" {
-		return "missing required header Authorization"
+		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "Authorization"}
 	}
 	if !strings.HasPrefix(header, authPrefix) {
-		return "Authorization is not in the form 'V2-HMAC-SHA256, Signature: <hex>'"
+		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "authorization"}
 	}
 
 	want := sign(s.opts.SecretKey, []byte(login+date+string(body)))
 	if !hmac.Equal([]byte(strings.TrimPrefix(header, authPrefix)), []byte(want)) {
-		return "signature mismatch: the digest does not match HMAC-SHA256(secret, X-Login + X-Date + body) over the received body"
+		return &authFailure{400, codeSignatureMismatch, "Signature not match", ""}
 	}
-	return ""
+	return nil
 }
 
-func (s *Server) verifyPayoutsSignature(r *http.Request, body []byte) string {
+func (s *Server) verifyPayoutsSignature(r *http.Request, body []byte) *authFailure {
 	if r.Header.Get("Authorization") != "" {
-		return "payouts request carried an Authorization header; that is the payins scheme"
+		return &authFailure{400, codeInvalidParameter, "payouts request carried an Authorization header; that is the payins scheme", "payload-signature"}
 	}
 
 	header := r.Header.Get("Payload-Signature")
 	if header == "" {
-		return "missing required header Payload-Signature"
+		return &authFailure{400, codeInvalidParameter, "Invalid parameter", "Payload-Signature"}
 	}
 	if !hmac.Equal([]byte(header), []byte(sign(s.opts.SecretKey, body))) {
-		return "signature mismatch: the digest does not match HMAC-SHA256(secret, body) over the received body"
+		return &authFailure{400, codeSignatureMismatch, "Signature not match", ""}
 	}
-	return ""
+	return nil
+}
+
+// isISO8601 accepts the two shapes dLocal's own examples use.
+func isISO8601(value string) bool {
+	for _, layout := range []string{"2006-01-02T15:04:05.000Z07:00", time.RFC3339} {
+		if _, err := time.Parse(layout, value); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func sign(secret string, message []byte) string {
@@ -214,4 +244,16 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status, code int, message string) {
 	writeJSON(w, status, map[string]any{"code": code, "message": message})
+}
+
+func writeErrorParam(w http.ResponseWriter, status, code int, message, param string) {
+	writeJSON(w, status, map[string]any{"code": code, "message": message, "param": param})
+}
+
+func writeFailure(w http.ResponseWriter, f *authFailure) {
+	payload := map[string]any{"code": f.code, "message": f.message}
+	if f.param != "" {
+		payload["param"] = f.param
+	}
+	writeJSON(w, f.status, payload)
 }

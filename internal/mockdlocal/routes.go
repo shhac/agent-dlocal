@@ -19,5 +19,15 @@ func Routes() []string {
 		"Anything else 404s in dLocal's error shape.",
 		"",
 		"Every route except GET / verifies the HMAC signature over the bytes received.",
+		"",
+		"Rejections mirror the real API (verified against sandbox.dlocal.com):",
+		"  bad signature      400 {code:5000}   <- NOT a 401",
+		"  missing header     400 {code:5001, param}",
+		"  unknown login      403 {code:3001}   <- same as an IP-blocked caller",
+		"  unknown payment    404 {code:4000}",
+		"  unknown refund     404 {code:4001}",
+		"  unrouted path      404 NOT_FOUND     <- plain text, not JSON",
+		"A stale X-Date is ACCEPTED: the date is signed as well as sent, so clock",
+		"skew is not a failure mode.",
 	}
 }

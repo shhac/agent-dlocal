@@ -16,7 +16,6 @@ func main() {
 	var (
 		addr      string
 		routes    bool
-		maxSkew   time.Duration
 		login     string
 		transKey  string
 		secretKey string
@@ -42,7 +41,6 @@ func main() {
 					Login:     login,
 					TransKey:  transKey,
 					SecretKey: secretKey,
-					MaxSkew:   maxSkew,
 				}),
 				ReadHeaderTimeout: 5 * time.Second,
 			}
@@ -57,7 +55,6 @@ func main() {
 	flags := cmd.Flags()
 	flags.StringVar(&addr, "addr", "127.0.0.1:12112", "Address to listen on")
 	flags.BoolVar(&routes, "routes", false, "Print the mock route map and exit")
-	flags.DurationVar(&maxSkew, "max-skew", mockdlocal.DefaultMaxSkew, "Accepted X-Date clock skew")
 	flags.StringVar(&login, "login", mockdlocal.DefaultLogin, "Expected X-Login")
 	flags.StringVar(&transKey, "trans-key", mockdlocal.DefaultTransKey, "Expected X-Trans-Key")
 	flags.StringVar(&secretKey, "secret-key", mockdlocal.DefaultSecretKey, "Secret used to verify signatures")

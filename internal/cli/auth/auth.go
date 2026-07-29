@@ -16,6 +16,7 @@ import (
 var (
 	credentialStore  = credential.Store
 	credentialRemove = credential.Remove
+	credentialGet    = credential.Get
 )
 
 func Register(root *cobra.Command, globals shared.GlobalsFunc) {
@@ -107,6 +108,15 @@ func registerAdd(parent *cobra.Command, use, short string) {
 				set = filled
 			}
 
+			// On update, anything the caller did not supply falls back to what
+			// is already stored, so changing non-secret metadata (say, flipping
+			// --sandbox) does not force the user to re-enter three secrets they
+			// have not changed. Supplied values always win, so
+			// `--form` still replaces and `--secret-key X` still rotates one.
+			if use == "update" {
+				set = fillFromStored(alias, set)
+			}
+
 			if !set.Complete() {
 				return shared.RequireFlag(set.Missing()[0], "",
 					"Prefer 'agent-dlocal auth "+use+" "+alias+" --form' so the user types the secrets into a native dialog. "+
@@ -145,6 +155,29 @@ func statusFor(use string) string {
 		return "updated"
 	}
 	return "added"
+}
+
+// fillFromStored backfills secrets the caller did not supply from the profile's
+// existing credential set. A profile with nothing stored yet is not an error
+// here — the completeness check downstream reports what is still missing.
+func fillFromStored(alias string, set credential.Set) credential.Set {
+	stored, err := credentialGet(alias)
+	if err != nil {
+		return set
+	}
+	if set.Login == "" {
+		set.Login = stored.Login
+	}
+	if set.TransKey == "" {
+		set.TransKey = stored.TransKey
+	}
+	if set.SecretKey == "" {
+		set.SecretKey = stored.SecretKey
+	}
+	if set.KeyPassphrase == "" {
+		set.KeyPassphrase = stored.KeyPassphrase
+	}
+	return set
 }
 
 // registerCheck verifies credentials end to end. dLocal has no /account

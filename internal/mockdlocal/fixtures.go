@@ -80,7 +80,7 @@ func handlePayment(w http.ResponseWriter, r *http.Request, _ []byte) {
 	id := r.PathValue("id")
 	sc, ok := scenarioFor(id, payinScenarios)
 	if !ok {
-		writeError(w, http.StatusNotFound, 4000, "Payment not found: "+id)
+		writeError(w, http.StatusNotFound, codePaymentNotFound, "Payment not found")
 		return
 	}
 
@@ -114,7 +114,7 @@ func handlePaymentStatus(w http.ResponseWriter, r *http.Request, _ []byte) {
 	id := r.PathValue("id")
 	sc, ok := scenarioFor(id, payinScenarios)
 	if !ok {
-		writeError(w, http.StatusNotFound, 4000, "Payment not found: "+id)
+		writeError(w, http.StatusNotFound, codePaymentNotFound, "Payment not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -130,7 +130,7 @@ func handleOrder(w http.ResponseWriter, r *http.Request, _ []byte) {
 	suffix := orderID[strings.LastIndex(orderID, "-")+1:]
 	sc, ok := payinScenarios[suffix]
 	if !ok {
-		writeError(w, http.StatusNotFound, 4000, "Order not found: "+orderID)
+		writeError(w, http.StatusNotFound, codePaymentNotFound, "Payment not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -154,7 +154,7 @@ func handleRefund(w http.ResponseWriter, r *http.Request, _ []byte) {
 		"cancelled": {"CANCELLED", "400", "The refund was cancelled"},
 	})
 	if !ok {
-		writeError(w, http.StatusNotFound, 4000, "Refund not found: "+id)
+		writeError(w, http.StatusNotFound, codeRefundNotFound, "Refund not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -172,7 +172,7 @@ func handleRefund(w http.ResponseWriter, r *http.Request, _ []byte) {
 func handleChargeback(w http.ResponseWriter, r *http.Request, _ []byte) {
 	id := r.PathValue("id")
 	if !strings.HasPrefix(id, "CHAR") {
-		writeError(w, http.StatusNotFound, 4000, "Chargeback not found: "+id)
+		writeError(w, http.StatusNotFound, codePaymentNotFound, "Chargeback not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -191,9 +191,12 @@ func handleChargeback(w http.ResponseWriter, r *http.Request, _ []byte) {
 func handlePaymentMethods(w http.ResponseWriter, r *http.Request, _ []byte) {
 	country := r.URL.Query().Get("country")
 	if country == "" {
-		writeError(w, http.StatusBadRequest, 5001, "country is required")
+		writeErrorParam(w, http.StatusBadRequest, codeInvalidParameter, "Missing parameter: country", "country")
 		return
 	}
+	// The real response carries exactly these five keys per entry — no country
+	// echo and no details/banks block, both of which an earlier version of this
+	// mock invented. Verified against the live sandbox.
 	writeJSON(w, http.StatusOK, []map[string]any{
 		{
 			"id":            "CARD",
@@ -201,7 +204,6 @@ func handlePaymentMethods(w http.ResponseWriter, r *http.Request, _ []byte) {
 			"name":          "Credit Card",
 			"logo":          "https://static.dlocal.com/images/providers/CARD.png",
 			"allowed_flows": []string{"DIRECT"},
-			"country":       country,
 		},
 		{
 			"id":            "OS",
@@ -209,13 +211,6 @@ func handlePaymentMethods(w http.ResponseWriter, r *http.Request, _ []byte) {
 			"name":          "Smart Pix",
 			"logo":          "https://static.dlocal.com/images/providers/OS.png",
 			"allowed_flows": []string{"DIRECT", "REDIRECT"},
-			"country":       country,
-			"details": map[string]any{
-				"banks": []map[string]any{
-					{"id": "1", "name": "Banco do Brasil S.A"},
-					{"id": "213", "name": "Banco Arbi S.A"},
-				},
-			},
 		},
 	})
 }
@@ -224,7 +219,7 @@ func handlePayout(w http.ResponseWriter, r *http.Request, _ []byte) {
 	id := r.PathValue("id")
 	sc, ok := scenarioFor(id, payoutScenarios)
 	if !ok {
-		writeError(w, http.StatusNotFound, 4000, "Payout not found: "+id)
+		writeError(w, http.StatusNotFound, codePaymentNotFound, "Payout not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

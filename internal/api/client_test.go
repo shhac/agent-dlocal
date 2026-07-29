@@ -116,29 +116,85 @@ func TestGetEncodesQueryParams(t *testing.T) {
 	}
 }
 
-func TestUnauthorizedHintNamesClockSkew(t *testing.T) {
+// dLocal answers a bad signature with 400/5000 — not a 401 — so classification
+// keys off the dLocal code rather than the HTTP status.
+func TestSignatureMismatchIsHumanFixable(t *testing.T) {
+	err := errFor(t, http.StatusBadRequest, `{"code":5000,"message":"Signature not match"}`)
+
+	if err.FixableBy != agenterrors.FixableByHuman {
+		t.Errorf("fixable_by = %q, want human", err.FixableBy)
+	}
+	if !strings.Contains(err.Hint, "secret key") {
+		t.Errorf("hint should point at the stored secret key:\n%s", err.Hint)
+	}
+	// The hint used to blame clock skew. It is wrong: X-Date is signed as well
+	// as sent, so a drifted clock stays self-consistent and validates. Verified
+	// against the live sandbox with a date a year stale.
+	if !strings.Contains(err.Hint, "does NOT cause this") {
+		t.Errorf("hint should rule clock skew OUT rather than in:\n%s", err.Hint)
+	}
+}
+
+// 3001 is returned before the signature is checked, so it cannot distinguish a
+// bad credential from a caller whose IP is not allowlisted. The hint has to say
+// so rather than pick one.
+func TestInvalidCredentialsHintEnumeratesCauses(t *testing.T) {
+	err := errFor(t, http.StatusForbidden, `{"code":3001,"message":"Invalid credentials"}`)
+
+	if err.FixableBy != agenterrors.FixableByHuman {
+		t.Errorf("fixable_by = %q, want human", err.FixableBy)
+	}
+	for _, want := range []string{"IP Whitelist", "sandbox"} {
+		if !strings.Contains(err.Hint, want) {
+			t.Errorf("hint does not mention %q:\n%s", want, err.Hint)
+		}
+	}
+}
+
+func TestInvalidParameterNamesTheParam(t *testing.T) {
+	err := errFor(t, http.StatusBadRequest, `{"code":5001,"message":"Missing parameter: country","param":"country"}`)
+
+	if err.FixableBy != agenterrors.FixableByAgent {
+		t.Errorf("fixable_by = %q, want agent", err.FixableBy)
+	}
+	if !strings.Contains(err.Error(), "country") || !strings.Contains(err.Hint, "country") {
+		t.Errorf("the offending param should surface in both message and hint:\n%s\n%s", err.Error(), err.Hint)
+	}
+}
+
+// An unrouted path returns the bare string NOT_FOUND, so the classifier must
+// survive a non-JSON body.
+func TestNonJSONErrorBodyIsHandled(t *testing.T) {
+	err := errFor(t, http.StatusNotFound, "NOT_FOUND")
+
+	if !strings.Contains(err.Error(), "NOT_FOUND") {
+		t.Errorf("non-JSON body was lost: %s", err.Error())
+	}
+	if err.FixableBy != agenterrors.FixableByAgent {
+		t.Errorf("fixable_by = %q, want agent", err.FixableBy)
+	}
+}
+
+// errFor drives a real request against a server returning the given body, so
+// the classification is exercised through the client rather than in isolation.
+func errFor(t *testing.T, status int, body string) *agenterrors.APIError {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"code":401,"message":"Invalid signature"}`))
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, PayinsSigner{Creds: testCreds()})
-	_, err := client.Get(context.Background(), "/payments/D-4-abc", url.Values{})
+	_, err := client.Get(context.Background(), "/probe", url.Values{})
 	if err == nil {
-		t.Fatal("Get: want an error for 401, got nil")
+		t.Fatalf("expected an error for HTTP %d", status)
 	}
-
 	apiErr, ok := err.(*agenterrors.APIError)
 	if !ok {
 		t.Fatalf("error type = %T, want *agenterrors.APIError", err)
 	}
-	if apiErr.FixableBy != agenterrors.FixableByHuman {
-		t.Errorf("fixable_by = %q, want human", apiErr.FixableBy)
-	}
-	if !strings.Contains(apiErr.Hint, "clock skew") {
-		t.Errorf("401 hint does not mention clock skew, the most confusing cause:\n%s", apiErr.Hint)
-	}
+	return apiErr
 }
 
 func TestNotFoundIsAgentFixable(t *testing.T) {
@@ -158,7 +214,7 @@ func TestNotFoundIsAgentFixable(t *testing.T) {
 	if apiErr.FixableBy != agenterrors.FixableByAgent {
 		t.Errorf("fixable_by = %q, want agent — a 404 is the agent's id to correct", apiErr.FixableBy)
 	}
-	if !strings.Contains(apiErr.Hint, "sandbox") {
+	if !strings.Contains(apiErr.Hint, "separate ledgers") {
 		t.Errorf("404 hint should raise the live/sandbox split:\n%s", apiErr.Hint)
 	}
 }

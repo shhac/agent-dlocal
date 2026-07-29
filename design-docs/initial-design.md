@@ -29,7 +29,11 @@ rather than from agent-stripe's shape.
 | `GET /orders/{order_id}` | Merchant-order-id → order record (order_id, payment_id, status triple, amounts) | yes |
 | `GET /refunds/{id}` | Refund record | yes |
 | `GET /chargebacks/{id}` | Chargeback record | yes |
-| `GET /payments-methods?country=XX` | Enabled payment methods for a country, incl. bank lists | yes |
+| `GET /payments-methods?country=XX` | Enabled payment methods for a country | yes |
+
+Response shape, verified live: each entry carries exactly `id`, `type`, `name`, `logo`,
+`allowed_flows`. There is no `country` echo and no `details.banks` block on a plain country query,
+though the docs show one for specific methods (SmartPix, PSE).
 
 ### Payouts v2 — `https://marketplace-api.dlocal.com` (live) / `https://marketplace-api.dlocal-sbox.com` (sandbox)
 
@@ -271,17 +275,32 @@ Payouts status codes:
 
 HTTP-level classification:
 
-| HTTP | `fixable_by` | Hint |
-|---|---|---|
-| 401 | `human` | Signature/credential failure. Names the three usual causes: wrong secret, **clock skew on `X-Date`**, or a body that changed between signing and sending |
-| 403 | `human` | Credential lacks permission, or the merchant is not enabled for this country/method |
-| 404 | `agent` | Check the id, the environment (live vs sandbox are separate ledgers), and for `payments/{id}/status` the 12-month retention window |
-| 429 | `retry` | Rate limited; retried `--max-retries` times already |
-| 5xx | `retry` | dLocal server error |
+**Classification keys off the dLocal `code`, not the HTTP status** — the two disagree, and the
+status alone is misleading. Every row below was observed against `sandbox.dlocal.com`:
 
-The 401 hint calling out clock skew is deliberate: `X-Date` is inside the signed message, so a
-machine with a drifted clock produces a valid-looking signature that dLocal rejects. It is the
-single most confusing failure mode in this API and the agent should not have to rediscover it.
+| dLocal code | HTTP | `fixable_by` | Meaning |
+|---|---|---|---|
+| 5000 | **400** | `human` | Signature did not match. Usually a truncated secret key. |
+| 3001 | 403 | `human` | Caller rejected *before* the signature is checked: IP not allowlisted, wrong host for the credential, or wrong X-Login |
+| 5001 | 400 | `agent` | Missing/malformed parameter or header; the body carries `param` naming it |
+| 4000 | 404 | `agent` | Payment / order / chargeback not found |
+| 4001 | 404 | `agent` | Refund not found (note the different code) |
+| — | 429 | `retry` | Rate limited |
+| — | 5xx | `retry` | dLocal server error |
+
+> **Correction: clock skew is not a failure mode.** An earlier version of this document claimed a
+> drifted clock produces "a valid-looking signature that dLocal rejects", and made that the headline
+> 401 hint. It is wrong. `X-Date` is signed *and* sent, so a wrong clock yields a **self-consistent**
+> signature that validates: the sandbox accepts a date a year stale and a month in the future, both
+> 200. Skew only matters if the date used for signing differs from the date sent — a code bug, which
+> the single-serialization design already prevents. The hint now rules skew *out* explicitly, because
+> the plausible-sounding wrong answer costs more than no answer.
+
+> **Correction: a bad signature is a 400, not a 401.** The API returns no 401 at all on the paths
+> this CLI uses. A rejection is 400/5000 (signature), 400/5001 (parameter), or 403/3001 (caller).
+> Because 403/3001 is returned before signature evaluation, a *deliberately corrupted* signature and
+> a *blocked IP* are byte-identical responses — so that error can never be used to confirm a
+> credential is correct.
 
 ### Retries
 
@@ -372,6 +391,9 @@ Profile metadata (all non-secret): `environment`, `base_url`, `payouts_base_url`
 ---
 
 ## dLocal docs checked
+
+All of the above was re-verified against the live sandbox on 2026-07-29; where the docs and observed
+behaviour differ, the observed behaviour is recorded and the divergence noted.
 
 - Generate a signature — `https://docs.dlocal.com/docs/generate-signature`
 - Initial settings (incl. mTLS client-cert example) — `https://docs.dlocal.com/docs/initial-settings`

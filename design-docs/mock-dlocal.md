@@ -39,21 +39,34 @@ Meta:
 |---|---|
 | `GET /` | Route inventory as JSON — the same list `mockdlocal --routes` prints |
 
-An unknown path returns dLocal's 404 shape, not Go's default `404 page not found`.
+An unknown path returns the bare string `NOT_FOUND` with a 404 — **not** JSON. That is what the real
+API does, and reproducing it keeps the client's non-JSON error path exercised.
+
+Not-found codes differ by resource: payments, orders and chargebacks return `4000`, refunds return
+`4001`.
 
 ### Authentication enforcement
 
 Every route except `GET /` enforces, in order:
 
 1. **Presence.** `X-Login`, `X-Trans-Key`, `X-Date`, and the signature header must all be present.
-   A missing one returns `401` with a body naming which header was absent — the mock's error is a
-   teaching tool, so it says what is wrong rather than just refusing.
+   A missing one returns **`400` `{"code":5001,...,"param":"<header>"}`** — not a 401. The real API
+   has no 401 on these paths at all. `X-Version` and `User-Agent` are documented as required but the
+   real API serves requests without them, so the mock does not demand them either.
 2. **Signature.** Recompute `hex_lower(HMAC_SHA256(secret, X-Login || X-Date || body))` over the
-   **raw request body bytes as received** and compare in constant time. A mismatch returns `401`
-   with `status_code` `401` and a detail distinguishing "signature mismatch" from "missing header".
-3. **Clock skew.** `X-Date` must parse as ISO-8601 and sit within a configurable window
-   (`--max-skew`, default 5 minutes). Outside it, `401` with a detail naming clock skew — mirroring
-   the real API's most confusing failure so the hint text can be tested.
+   **raw request body bytes as received** and compare in constant time. A mismatch returns
+   **`400` `{"code":5000,"message":"Signature not match"}`**.
+   An unknown merchant returns **`403` `{"code":3001,"message":"Invalid credentials"}`** — the same
+   response a caller gets when their IP is not allowlisted, which is exactly why that error cannot
+   distinguish the two.
+3. **X-Date format only.** It must parse as ISO-8601; staleness is **not** checked.
+
+> **Correction.** This document originally specified a `--max-skew` window rejecting a stale
+> `X-Date`, on the theory that a drifted clock was the API's "most confusing failure". Testing
+> against the live sandbox disproved it: dates a year old and a month in the future are both
+> accepted, because the date is signed as well as sent and so stays self-consistent. The window and
+> its flag are removed — a mock stricter than the real thing manufactures failures that cannot
+> happen in production, which is worse than no check at all.
 
 The expected credentials default to `mocklogin` / `mocktrans` / `mocksecret` and are overridable
 with `--login`, `--trans-key`, `--secret-key`.
@@ -71,7 +84,7 @@ The payouts route verifies `Payload-Signature` and rejects a request that carrie
 ## CLI wiring
 
 ```
-mockdlocal [--addr 127.0.0.1:12112] [--routes] [--max-skew 5m]
+mockdlocal [--addr 127.0.0.1:12112] [--routes]
            [--login mocklogin] [--trans-key mocktrans] [--secret-key mocksecret]
 ```
 

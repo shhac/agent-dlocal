@@ -110,8 +110,13 @@ Payouts use a **different** table — code 500 means `DELIVERED` for a payout an
 - **Live and sandbox are separate ledgers.** An id from one never resolves against the other, and a
   404 is often really an environment mix-up. dLocal keys carry no `test`/`live` marker, so check the
   profile: `agent-dlocal auth list`.
-- **A 401 is often clock skew, not a bad secret.** `X-Date` is inside the signed message, so a
-  drifted system clock produces a well-formed signature that dLocal rejects.
+- **Read the dLocal `code`, not the HTTP status.** They disagree: a bad signature is
+  `400 {"code":5000}`, not a 401. `403 {"code":3001} Invalid credentials` is returned *before* the
+  signature is checked, so it means the caller was rejected outright — most often the machine's IP
+  is not on the dashboard's IP Whitelist for that product and environment, or the profile points at
+  the wrong host.
+- **Clock skew is NOT a failure mode**, despite the timestamp being part of the signature. `X-Date`
+  is signed *and* sent, so a drifted clock stays self-consistent and validates fine.
 - **`order_id` is the merchant's id, not dLocal's.** If the user gives you their own reference, use
   `orders get`, not `payments get`.
 

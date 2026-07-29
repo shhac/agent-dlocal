@@ -52,58 +52,86 @@ func TestCorrectlySignedRequestSucceeds(t *testing.T) {
 
 // The mock's whole reason to exist: a wrong signature must be rejected, or a
 // signing bug in the client would sail through every e2e test.
+//
+// Note the status: the real API answers a bad signature with 400/5000, NOT a
+// 401. An earlier version of this mock guessed 401 and was wrong.
 func TestWrongSignatureIsRejected(t *testing.T) {
 	req := signedRequest(t, http.MethodGet, "/payments/D-4-paid")
 	req.Header.Set("Authorization", authPrefix+strings.Repeat("0", 64))
 
 	rec := do(t, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (dLocal answers a bad signature with 400/5000)", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "signature mismatch") {
-		t.Fatalf("401 body should distinguish a mismatch from a missing header:\n%s", rec.Body)
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != float64(codeSignatureMismatch) {
+		t.Fatalf("code = %v, want %d", body["code"], codeSignatureMismatch)
 	}
 }
 
-func TestMissingHeaderNamesTheHeader(t *testing.T) {
+// A missing header is a 400 "Invalid parameter", not a 401 — again matching the
+// real API rather than what a REST-shaped guess would predict.
+func TestMissingHeaderIsAnInvalidParameter(t *testing.T) {
 	for _, header := range []string{"X-Login", "X-Trans-Key", "X-Date", "Authorization"} {
 		req := signedRequest(t, http.MethodGet, "/payments/D-4-paid")
 		req.Header.Del(header)
 
 		rec := do(t, req)
 
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s removed: status = %d, want 401", header, rec.Code)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s removed: status = %d, want 400", header, rec.Code)
 			continue
 		}
-		if !strings.Contains(rec.Body.String(), header) {
-			t.Errorf("401 for a missing %s did not name it:\n%s", header, rec.Body)
+		var body map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		if body["code"] != float64(codeInvalidParameter) {
+			t.Errorf("%s removed: code = %v, want %d", header, body["code"], codeInvalidParameter)
 		}
 	}
 }
 
-// The real API folds X-Date into the signed message, so a drifted clock is a
-// distinct failure. Reproducing it here is what makes the CLI's clock-skew hint
-// testable.
-func TestClockSkewIsRejected(t *testing.T) {
-	stale := time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000") + "Z"
-
-	req := httptest.NewRequest(http.MethodGet, "/payments/D-4-paid", nil)
-	req.Header.Set("X-Login", DefaultLogin)
-	req.Header.Set("X-Trans-Key", DefaultTransKey)
-	req.Header.Set("X-Date", stale)
-	mac := hmac.New(sha256.New, []byte(DefaultSecretKey))
-	mac.Write([]byte(DefaultLogin + stale))
-	req.Header.Set("Authorization", authPrefix+hex.EncodeToString(mac.Sum(nil)))
+// An unknown merchant is 403/3001 — the SAME response the real API gives a
+// caller whose IP is not allowlisted. That collision is why 3001 cannot be used
+// to tell a bad credential from a blocked network path.
+func TestUnknownLoginIsInvalidCredentials(t *testing.T) {
+	req := signedRequest(t, http.MethodGet, "/payments/D-4-paid")
+	req.Header.Set("X-Login", "somebody-else")
 
 	rec := do(t, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 for a stale X-Date", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "clock skew") {
-		t.Fatalf("401 body should name clock skew:\n%s", rec.Body)
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != float64(codeInvalidCredentials) {
+		t.Fatalf("code = %v, want %d", body["code"], codeInvalidCredentials)
+	}
+}
+
+// A stale X-Date is ACCEPTED. This is the reverse of what the mock originally
+// asserted, and the correction matters: because X-Date is signed as well as
+// sent, a drifted clock produces a self-consistent signature that validates
+// fine. Verified against the live sandbox with dates a year old and a month in
+// the future, both 200. Clock skew is therefore not a real failure mode, and
+// any hint claiming otherwise sends the reader hunting in the wrong place.
+func TestStaleDateIsAcceptedBecauseItIsSigned(t *testing.T) {
+	for _, offset := range []time.Duration{-365 * 24 * time.Hour, -time.Hour, 30 * 24 * time.Hour} {
+		stamp := time.Now().Add(offset).UTC().Format("2006-01-02T15:04:05.000") + "Z"
+
+		req := httptest.NewRequest(http.MethodGet, "/payments/D-4-paid", nil)
+		req.Header.Set("X-Login", DefaultLogin)
+		req.Header.Set("X-Trans-Key", DefaultTransKey)
+		req.Header.Set("X-Date", stamp)
+		mac := hmac.New(sha256.New, []byte(DefaultSecretKey))
+		mac.Write([]byte(DefaultLogin + stamp))
+		req.Header.Set("Authorization", authPrefix+hex.EncodeToString(mac.Sum(nil)))
+
+		if rec := do(t, req); rec.Code != http.StatusOK {
+			t.Errorf("X-Date offset %v: status = %d, want 200 — a signed stale date is valid\n%s", offset, rec.Code, rec.Body)
+		}
 	}
 }
 
@@ -112,8 +140,8 @@ func TestClockSkewIsRejected(t *testing.T) {
 func TestPayoutsRejectsThePayinsScheme(t *testing.T) {
 	rec := do(t, signedRequest(t, http.MethodGet, "/v2/payouts/P-1-paid"))
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 for a payins-signed payouts request", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a payins-signed payouts request", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "payins scheme") {
 		t.Fatalf("401 body should name the scheme mix-up:\n%s", rec.Body)
@@ -144,17 +172,73 @@ func TestPayoutsAcceptsPayloadSignature(t *testing.T) {
 }
 
 func TestUnknownIDReturnsDLocalShaped404(t *testing.T) {
-	rec := do(t, signedRequest(t, http.MethodGet, "/payments/D-4-nosuchthing"))
+	// Refunds use a different not-found code from everything else.
+	for path, want := range map[string]int{
+		"/payments/D-4-nosuchthing": codePaymentNotFound,
+		"/refunds/nosuchthing":      codeRefundNotFound,
+		"/chargebacks/nosuchthing":  codePaymentNotFound,
+	} {
+		rec := do(t, signedRequest(t, http.MethodGet, path))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, rec.Code)
+			continue
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Errorf("%s: 404 body is not JSON: %v", path, err)
+			continue
+		}
+		if body["code"] != float64(want) {
+			t.Errorf("%s: code = %v, want %d", path, body["code"], want)
+		}
+	}
+}
+
+// An unrouted path returns the bare string NOT_FOUND, not JSON. That is worth
+// reproducing because it is the client's only non-JSON error path.
+func TestUnroutedPathReturnsPlainText(t *testing.T) {
+	rec := do(t, signedRequest(t, http.MethodGet, "/not-a-real-route"))
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("404 body is not JSON: %v", err)
+	if got := strings.TrimSpace(rec.Body.String()); got != "NOT_FOUND" {
+		t.Fatalf("body = %q, want the bare string NOT_FOUND", got)
 	}
-	if _, ok := body["code"]; !ok {
-		t.Fatalf("404 is not in dLocal's {code,message} shape: %v", body)
+}
+
+// The real response carries exactly five keys per entry.
+func TestPaymentMethodsShapeMatchesTheRealAPI(t *testing.T) {
+	rec := do(t, signedRequest(t, http.MethodGet, "/payments-methods?country=BR"))
+
+	var methods []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &methods); err != nil {
+		t.Fatalf("response is not a JSON array: %v", err)
+	}
+	for _, m := range methods {
+		for _, key := range []string{"id", "type", "name", "logo", "allowed_flows"} {
+			if _, ok := m[key]; !ok {
+				t.Errorf("entry %v is missing %q", m["id"], key)
+			}
+		}
+		for _, absent := range []string{"country", "details"} {
+			if _, ok := m[absent]; ok {
+				t.Errorf("entry %v carries %q, which the real API does not return", m["id"], absent)
+			}
+		}
+	}
+}
+
+func TestMissingCountryNamesTheParam(t *testing.T) {
+	rec := do(t, signedRequest(t, http.MethodGet, "/payments-methods"))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["param"] != "country" {
+		t.Fatalf("body does not name the offending param: %v", body)
 	}
 }
 
