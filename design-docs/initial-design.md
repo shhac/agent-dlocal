@@ -278,7 +278,16 @@ in the surface below is a `GET`. The `api` escape hatch is `GET`-only by constru
 
 Inherited wholesale from `lib-agent-output` / `lib-agent-cli`. No variant is invented.
 
-- NDJSON by default; `--format json|yaml` available.
+- NDJSON by default — for single records as well as lists, via `libcli.EmitItem`, the family's
+  canonical emitter, whose doc is explicit that a single record "should still default to NDJSON like
+  every other get". `--format json|yaml` gives the pretty bare object (single) or `{"data":[…]}`
+  envelope (list).
+
+> **Corrected during the structural review.** `shared.WriteItem` defaulted to pretty JSON, copied
+> from agent-stripe's older emitter. That contradicted this document, the README, `usage`, and the
+> rest of the family — agent-notion and agent-slack already funnel through `EmitItem`. Six call
+> sites also passed a hardcoded `""` for the format, so `--format` was silently ignored on eight
+> commands.
 - `get <id>...` accepts multiple ids and emits one record per id **in input order**. A miss emits an
   `{"@unresolved": …}` line **on stdout with exit 0** — a 404 for one id must not abort a batch.
   Only command-level failures (bad credentials, no profile, network death) go to stderr with exit 1,

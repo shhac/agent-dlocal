@@ -69,9 +69,24 @@ func WriteList(items []any, format string) {
 	output.Print(map[string]any{"data": items}, f, true)
 }
 
+// WriteItem emits one structured record per the family's get-output contract:
+// NDJSON by default, the bare object under --format json|yaml.
+//
+// The default used to be pretty JSON, copied from agent-stripe's older
+// shared.WriteItem. That contradicted this CLI's own advertised convention
+// ("NDJSON by default") and the family's canonical emitter, libcli.EmitItem,
+// whose doc is explicit that single records "should still default to NDJSON
+// like every other get". agent-notion and agent-slack already funnel through
+// it; agent-stripe carries both shapes.
+//
+// Nulls are still pruned first, which EmitItem does not do — that part of the
+// old behaviour is deliberate and unrelated to the format default.
 func WriteItem(data any, format string) {
-	f := output.ResolveFormat(format, output.FormatJSON)
-	output.Print(data, f, true)
+	cleaned, ok := output.Clean(data)
+	if !ok {
+		cleaned = data
+	}
+	_ = libcli.EmitItem(output.Stdout(), format, cleaned)
 }
 
 func RedactionOptions(flags *GlobalFlags) output.RedactionOptions {

@@ -83,6 +83,10 @@ func Print(data any, format Format, prune bool) {
 	_ = out.Print(Stdout(), cleaned, format, nil)
 }
 
+// Clean round-trips data through JSON and prunes nulls, so a caller can hand
+// the result to an emitter that does not prune.
+func Clean(data any) (any, bool) { return toCleanAny(data, true) }
+
 func toCleanAny(data any, prune bool) (any, bool) {
 	b, err := json.Marshal(data)
 	if err != nil {

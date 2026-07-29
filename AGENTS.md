@@ -27,7 +27,14 @@ patterns.
   and the credential headers have no path to a transcript. If you ever add request-header logging,
   mask `Authorization`, `X-Login` and `X-Trans-Key` first. `internal/credential` has no method that
   returns a printable secret, and it should stay that way.
-- **Keep list outputs compact and NDJSON-friendly.**
+- **Keep outputs NDJSON-friendly, and default to NDJSON.** Single records go through
+  `shared.WriteItem`, which funnels to `libcli.EmitItem` — the family's canonical emitter, whose
+  contract is NDJSON by default and the bare object under `--format json|yaml`. Do not reintroduce a
+  pretty-JSON default; agent-stripe's older `shared.WriteItem` had one and it contradicted both this
+  CLI's advertised convention and the rest of the family.
+- **Reach for the shared lib before hand-rolling.** The `config` group is `libcli.ConfigCommand`,
+  not a bespoke get/set/unset. If you find yourself writing scaffolding roughly eight sibling CLIs
+  would also need, check `lib-agent-cli` first.
 - **Sign what you send.** The client serializes a body once into a `[]byte` that is both signed and
   sent. Do not add a path that marshals separately for signing — key ordering or whitespace drift
   produces intermittent 401s that look random.

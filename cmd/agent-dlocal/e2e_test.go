@@ -299,3 +299,44 @@ func TestFormatFlagIsHonouredEverywhere(t *testing.T) {
 		}
 	}
 }
+
+// Single records default to NDJSON, matching the family's canonical emitter
+// (libcli.EmitItem) and this CLI's own advertised convention. The default used
+// to be pretty JSON, copied from agent-stripe's older shared.WriteItem, which
+// contradicted both.
+func TestSingleRecordsDefaultToNDJSON(t *testing.T) {
+	for _, args := range [][]string{
+		{"investigate", "payment", "D-4-rejected"},
+		{"config", "path"},
+		{"usage"},
+		{"payments", "usage"},
+	} {
+		out := strings.TrimSpace(runMockCLI(t, args...))
+		if strings.HasPrefix(out, "{\n") {
+			t.Errorf("%v emitted pretty JSON by default; the contract is NDJSON:\n%s", args, out)
+		}
+		if lines := strings.Split(out, "\n"); len(lines) != 1 {
+			t.Errorf("%v emitted %d lines for one record", args, len(lines))
+		}
+	}
+
+	// --format json still gives the pretty bare object.
+	pretty := runMockCLI(t, "investigate", "payment", "D-4-rejected", "--format", "json")
+	if !strings.HasPrefix(strings.TrimSpace(pretty), "{\n") {
+		t.Errorf("--format json did not produce a pretty object:\n%s", pretty)
+	}
+}
+
+// The config group now comes from libcli.ConfigCommand, so it emits the
+// family's uniform {key,value,set} record and the structured unknown-key error.
+func TestConfigGroupUsesTheFamilyContract(t *testing.T) {
+	out := runMockCLI(t, "config", "list")
+	for _, want := range []string{`"key":"max_retries"`, `"key":"timeout_ms"`, `"set":false`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("config list missing %s:\n%s", want, out)
+		}
+	}
+
+	bad := runMockCLIErr(t, "config", "get", "nonsense")
+	assertContains(t, bad, "unknown config key", "fixable_by", "max_retries")
+}

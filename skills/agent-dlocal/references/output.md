@@ -2,8 +2,12 @@
 
 ## Formats
 
-NDJSON (`jsonl`) by default — one record per line, so a batch streams and greps cleanly.
-`--format json` and `--format yaml` produce a single document.
+NDJSON (`jsonl`) by default — one record per line, so a batch streams and greps cleanly. That
+applies to **single records too**, not just lists: `investigate`, `auth`, `config` and `usage` all
+emit one compact line by default.
+
+`--format json` and `--format yaml` produce a pretty document: the bare object for a single record,
+a `{"data":[…]}` envelope for a list.
 
 ## Multi-get
 
