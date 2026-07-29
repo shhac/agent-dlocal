@@ -17,7 +17,7 @@ Every command is a `GET`. There is no way to write through this CLI.
 
 | Command | Purpose |
 |---|---|
-| `auth add <profile> --form` | Store credentials via one native OS dialog. **Preferred.** |
+| `auth add <profile> --form` | Store credentials via native OS dialogs, one per secret. **Preferred.** |
 | `auth add <profile> --login … --trans-key … --secret-key …` | Non-interactive equivalent, for automation |
 | `auth add <profile> --sandbox` | Point the profile at sandbox rather than live |
 | `auth add <profile> --cert <path> --key <path>` | Enable mutual TLS (paths are stored, not file contents) |

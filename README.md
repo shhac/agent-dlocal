@@ -22,9 +22,10 @@ agent-dlocal auth add prod --form
 agent-dlocal auth check
 ```
 
-`--form` collects the X-Login, X-Trans-Key, and Secret key in a **single native OS dialog**, so the
-secrets go straight from the user's keyboard into the OS keychain. They never appear in a chat
-transcript and never pass through a model's context.
+`--form` collects the X-Login, X-Trans-Key, and Secret key through **native OS dialogs** — one per
+secret, each titled with the value it wants — so the secrets go straight from the user's keyboard
+into the OS keychain. They never appear in a chat transcript and never pass through a model's
+context. Values already given by flag are not prompted for again.
 
 If you are automating, `--login`/`--trans-key`/`--secret-key` exist — but prefer `--form` for
 anything a human is present for.

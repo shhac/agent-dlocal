@@ -149,8 +149,8 @@ ever reads them.
 
 ### `--form` is the primary path
 
-`--form` prompts for all secrets in a **single** native OS dialog — `dialog.Spec.Items` is already a
-slice, so four `dialog.Password` fields need no library change:
+`--form` prompts for each missing secret in a native OS dialog, **one field per dialog, with the
+field name in the dialog's title**:
 
 ```
 agent-dlocal auth add prod --cert ~/.dlocal/client.pem --key ~/.dlocal/client.key --form
@@ -158,6 +158,29 @@ agent-dlocal auth add prod --cert ~/.dlocal/client.pem --key ~/.dlocal/client.ke
 
 The secrets go from the user's keyboard straight into the OS keychain; they never enter a chat
 transcript or a model's context.
+
+> **Corrected after first use.** The original design said "all secrets in a *single* dialog",
+> reasoning that `dialog.Spec.Items` is a slice so a multi-field Spec would render as one form. Both
+> halves were wrong, and the result shipped in v0.1.0:
+>
+> 1. `dialog.Prompt` already renders a multi-item Spec as a **chain** of dialogs — one per field,
+>    titled `(step N of M)`. There is no combined-form mode.
+> 2. For a `Password` field with no `Initial`, the zenity backend calls `zenity.Password`, which
+>    renders a fixed `Password:` body and **discards `Field.Label`**. The label survives only in
+>    error messages.
+>
+> Together those produced three identical unlabelled `Password:` boxes numbered 1..3, with nothing
+> saying which secret each wanted. agent-stripe never hit this because it has exactly one secret and
+> its title says which. agent-dlocal is the family's first multi-secret tool.
+>
+> The fix keeps everything inside this repo: each field gets its own single-item Spec with a
+> self-describing title (`agent-dlocal · <profile> · X-Trans-Key (2 of 3)`). A single-item Spec also
+> suppresses the library's own `(step N of M)` suffix, so the title is entirely ours.
+>
+> The root fix belongs in `lib-agent-cli`: `promptOne` could use
+> `zenity.Entry(label, HideText())` — which honours the label *and* masks input, as the
+> `Initial != ""` branch already proves — instead of `zenity.Password`. That is a change across 14
+> repos, so it is proposed rather than assumed.
 
 **The certificate is not a form field.** `dialog.InputType` is `Text | Password` — single-line
 entries only. A PEM or `.jks` cannot sanely be typed into one, and a *path* is not a secret. So

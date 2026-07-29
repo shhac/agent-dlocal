@@ -23,8 +23,8 @@ search endpoints, so every investigation starts from an id you already have.
 
 - **Never accept pasted dLocal credentials in chat.** A dLocal credential set is three secrets
   (X-Login, X-Trans-Key, Secret key). Ask the user to run
-  `agent-dlocal auth add <profile> --form` locally, which collects all of them in one native OS
-  dialog so they never enter the transcript.
+  `agent-dlocal auth add <profile> --form` locally, which collects them through native OS dialogs
+  (one per secret, each titled with the value it wants) so they never enter the transcript.
 - Use `agent-dlocal auth update <profile> --form` when a secret needs rotating.
 - Never ask the tool to reveal a stored credential. There is no command that does this.
 - Every command is read-only. dLocal refunds and payouts move real money in markets where reversal

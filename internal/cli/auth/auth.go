@@ -76,7 +76,7 @@ func (f *credentialFlags) profile() config.Profile {
 
 func (f *credentialFlags) bind(cmd *cobra.Command) {
 	flags := cmd.Flags()
-	flags.BoolVar(&f.form, "form", false, "Prompt for every secret in one native OS dialog (the LLM never sees the input)")
+	flags.BoolVar(&f.form, "form", false, "Prompt for each missing secret in a native OS dialog (the LLM never sees the input)")
 	flags.StringVar(&f.login, "login", "", "X-Login value (prefer --form)")
 	flags.StringVar(&f.transKey, "trans-key", "", "X-Trans-Key value (prefer --form)")
 	flags.StringVar(&f.secretKey, "secret-key", "", "Secret key used for request signing (prefer --form)")

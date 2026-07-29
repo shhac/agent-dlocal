@@ -9,35 +9,77 @@ import (
 	"github.com/shhac/lib-agent-cli/dialog"
 )
 
-// promptCredentialsViaDialog collects every secret in ONE native dialog.
+// credentialField pairs a dialog field with the setter that files its value
+// into the credential set, so adding a secret is one table entry.
+type credentialField struct {
+	id    string
+	label string
+	// needed reports whether this secret is still missing, so a value already
+	// supplied by flag is not prompted for again.
+	needed func(credential.Set) bool
+	assign func(*credential.Set, string)
+}
+
+var credentialFields = []credentialField{
+	{
+		id: "login", label: "X-Login",
+		needed: func(s credential.Set) bool { return s.Login == "" },
+		assign: func(s *credential.Set, v string) { s.Login = v },
+	},
+	{
+		id: "trans_key", label: "X-Trans-Key",
+		needed: func(s credential.Set) bool { return s.TransKey == "" },
+		assign: func(s *credential.Set, v string) { s.TransKey = v },
+	},
+	{
+		id: "secret_key", label: "Secret key (used to sign requests)",
+		needed: func(s credential.Set) bool { return s.SecretKey == "" },
+		assign: func(s *credential.Set, v string) { s.SecretKey = v },
+	},
+}
+
+var passphraseField = credentialField{
+	id: "key_passphrase", label: "Client key passphrase (for mTLS)",
+	needed: func(s credential.Set) bool { return s.KeyPassphrase == "" },
+	assign: func(s *credential.Set, v string) { s.KeyPassphrase = v },
+}
+
+// promptCredentialsViaDialog collects the missing secrets through native OS
+// dialogs, so the values go from the user's keyboard into the keychain without
+// passing through the transcript or the model's context.
 //
-// dialog.Spec.Items is already a slice, so a four-field prompt needs no library
-// change. One dialog rather than four also means one cancel: a user who backs
-// out does not leave a half-written credential behind.
+// It prompts ONE FIELD PER CALL, with the field name in the dialog TITLE.
+// That is not a style choice — it is forced by the backend:
 //
-// Fields already supplied by flag are skipped, so `--login x --form` prompts
-// only for what is still missing.
+//   - dialog.Prompt already renders a multi-item Spec as a CHAIN of dialogs
+//     (one per field, titled "(step N of M)"), not as a single combined form.
+//     Passing all four items at once therefore buys nothing.
+//   - For a Password field with no Initial value, the zenity backend calls
+//     zenity.Password, which renders a generic "Password:" body and DISCARDS
+//     Field.Label entirely. The label survives only in error messages.
 //
-// The client certificate is deliberately NOT a field here. dialog.InputType is
-// Text | Password — single-line entries — and neither a PEM blob nor a .jks
+// So with a multi-item Spec the user sees three identical "Password:" boxes
+// numbered 1..3 with no indication of which secret each one wants. The title is
+// the only channel that reaches the screen, so each field gets its own
+// single-item Spec and a self-describing title.
+//
+// The client certificate is deliberately not collected here. dialog.InputType
+// is Text | Password — single-line entries — and neither a PEM blob nor a .jks
 // can sanely be typed into one. A path is also not a secret, so --cert/--key
-// take paths and the file stays under the user's own permissions. The key
-// PASSPHRASE is a field: short, single-line, and genuinely secret.
+// take paths. The key PASSPHRASE is prompted: short, single-line, and secret.
 func promptCredentialsViaDialog(ctx context.Context, profile string, set credential.Set, wantPassphrase bool) (credential.Set, error) {
-	items := make([]dialog.Field, 0, 4)
-	if set.Login == "" {
-		items = append(items, dialog.Field{ID: "login", Label: "X-Login", InputType: dialog.Password})
+	fields := credentialFields
+	if wantPassphrase {
+		fields = append(append([]credentialField{}, fields...), passphraseField)
 	}
-	if set.TransKey == "" {
-		items = append(items, dialog.Field{ID: "trans_key", Label: "X-Trans-Key", InputType: dialog.Password})
+
+	pending := make([]credentialField, 0, len(fields))
+	for _, field := range fields {
+		if field.needed(set) {
+			pending = append(pending, field)
+		}
 	}
-	if set.SecretKey == "" {
-		items = append(items, dialog.Field{ID: "secret_key", Label: "Secret key (signing)", InputType: dialog.Password})
-	}
-	if wantPassphrase && set.KeyPassphrase == "" {
-		items = append(items, dialog.Field{ID: "key_passphrase", Label: "Client key passphrase", InputType: dialog.Password})
-	}
-	if len(items) == 0 {
+	if len(pending) == 0 {
 		return set, nil
 	}
 
@@ -45,27 +87,33 @@ func promptCredentialsViaDialog(ctx context.Context, profile string, set credent
 		return set, classifyDialogErr(err, profile)
 	}
 
-	results, err := dialog.Default.Prompt(ctx, dialog.Spec{
-		Title: fmt.Sprintf("agent-dlocal credentials: %s", profile),
-		Items: items,
-	})
-	if err != nil {
-		return set, classifyDialogErr(err, profile)
-	}
+	for i, field := range pending {
+		spec := dialog.Spec{
+			Title: promptTitle(profile, field.label, i, len(pending)),
+			Items: []dialog.Field{{ID: field.id, Label: field.label, InputType: dialog.Password}},
+		}
 
-	for _, result := range results {
-		switch result.ID {
-		case "login":
-			set.Login = result.Value
-		case "trans_key":
-			set.TransKey = result.Value
-		case "secret_key":
-			set.SecretKey = result.Value
-		case "key_passphrase":
-			set.KeyPassphrase = result.Value
+		results, err := dialog.Default.Prompt(ctx, spec)
+		if err != nil {
+			return set, classifyDialogErr(err, profile)
+		}
+		for _, result := range results {
+			if result.ID == field.id {
+				field.assign(&set, result.Value)
+			}
 		}
 	}
 	return set, nil
+}
+
+// promptTitle names the profile, the secret being asked for, and the position
+// in the chain. Since the password dialog's body is a fixed "Password:", this
+// title is the user's only cue about which value to paste.
+func promptTitle(profile, label string, index, total int) string {
+	if total == 1 {
+		return fmt.Sprintf("agent-dlocal · %s · %s", profile, label)
+	}
+	return fmt.Sprintf("agent-dlocal · %s · %s (%d of %d)", profile, label, index+1, total)
 }
 
 func classifyDialogErr(err error, profile string) error {
