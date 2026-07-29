@@ -67,10 +67,27 @@ agent-dlocal refunds get REF-4471
 agent-dlocal chargebacks get CHAR42342
 agent-dlocal payouts get P-2-91bc
 agent-dlocal payment-methods list --country BR
+agent-dlocal payment-methods countries --supported  # which markets work at all
 agent-dlocal api get /payments/D-4-aaa           # GET-only escape hatch
 ```
 
 `agent-dlocal usage` prints the whole map; each group has its own `usage` too.
+
+## Discovering markets
+
+dLocal has no list-countries endpoint, so `payment-methods countries` probes each market and reports
+which resolve for your credentials — 43 markets in about a second:
+
+```
+$ agent-dlocal payment-methods countries --supported
+{"country":"BR","supported":true,"payment_methods":49}
+{"country":"MX","supported":true,"payment_methods":37}
+...
+```
+
+Supported markets span South and Central America, South and Southeast Asia (including the
+Philippines, Indonesia, Vietnam, Thailand, Malaysia, India, Japan), and much of Africa. dLocal does
+**not** support Singapore, South Korea, Taiwan, Hong Kong, Venezuela, or western Europe.
 
 ## Read-only by design
 

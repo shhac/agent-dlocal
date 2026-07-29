@@ -69,6 +69,7 @@ agent-dlocal refunds get <refund_id>...
 agent-dlocal chargebacks get <chargeback_id>...
 agent-dlocal payouts get <payout_id>...
 agent-dlocal payment-methods list --country BR
+agent-dlocal payment-methods countries --supported  # which markets work at all
 agent-dlocal api get <path> [--query k=v] [--payouts]
 ```
 
@@ -118,6 +119,10 @@ Payouts use a **different** table — code 500 means `DELIVERED` for a payout an
   the wrong host.
 - **Clock skew is NOT a failure mode**, despite the timestamp being part of the signature. `X-Date`
   is signed *and* sent, so a drifted clock stays self-consistent and validates fine.
+- **There is no list-countries endpoint.** If the user asks which markets they can operate in, run
+  `payment-methods countries --supported` — it probes each market. dLocal does **not** support
+  Singapore, South Korea, Taiwan, Hong Kong, Venezuela, or western Europe; an unsupported code
+  returns `400 {"code":5003}`.
 - **`order_id` is the merchant's id, not dLocal's.** If the user gives you their own reference, use
   `orders get`, not `payments get`.
 

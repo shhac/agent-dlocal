@@ -114,6 +114,16 @@ func FetchItem(ctx context.Context, client *api.Client, flags *GlobalFlags, path
 	return output.Redact(data, RedactionOptions(flags)), nil
 }
 
+// countJSONArray counts the elements of a JSON array response without decoding
+// it into a typed shape.
+func countJSONArray(raw json.RawMessage) int {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return 0
+	}
+	return len(items)
+}
+
 func WriteDebug(fields map[string]any) {
 	enc := json.NewEncoder(output.Stderr())
 	enc.SetEscapeHTML(false)

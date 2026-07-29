@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"net/url"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -184,6 +185,60 @@ func registerPaymentMethods(root *cobra.Command, globals shared.GlobalsFunc) {
 	list.Flags().StringVar(&country, "country", "", "ISO 3166-1 alpha-2 country code (required)")
 	group.AddCommand(list)
 
+	registerCountryDiscovery(group, globals)
+
 	registerDomainUsage(group, "payment-methods", paymentMethodsUsage)
 	root.AddCommand(group)
+}
+
+// registerCountryDiscovery answers "which markets can this merchant take money
+// in?" — a question dLocal exposes no endpoint for. There is no list-countries
+// call, so the only way to find out is to ask per country and see which resolve.
+//
+// That makes this the one command that issues many requests for one answer. It
+// is still read-only, and the alternative is the operator running the same
+// probe by hand, so the fan-out belongs in the tool rather than in a shell loop
+// somebody re-invents each time.
+func registerCountryDiscovery(group *cobra.Command, globals shared.GlobalsFunc) {
+	var concurrency int
+	var supportedOnly bool
+	var countries []string
+
+	cmd := &cobra.Command{
+		Use:   "countries",
+		Short: "Discover which countries this merchant is enabled for",
+		Long: "Probe each of dLocal's markets and report which resolve for these credentials.\n\n" +
+			"dLocal has no list-countries endpoint, so this issues one GET per country " +
+			"(" + itoa(len(api.Markets)) + " by default) and reports the outcome of each. " +
+			"Use --country to probe a specific set instead, including codes not on the built-in list.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := globals()
+			targets := countries
+			if len(targets) == 0 {
+				targets = api.Markets
+			}
+
+			return shared.WithClient(flags, func(ctx context.Context, client *api.Client) error {
+				results := shared.ProbeCountries(ctx, client, targets, concurrency)
+				shared.SortProbes(results)
+				items := make([]any, 0, len(results))
+				for _, r := range results {
+					if supportedOnly && !r.Supported {
+						continue
+					}
+					items = append(items, r)
+				}
+				shared.WriteList(items, flags.Format)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().IntVar(&concurrency, "concurrency", 8, "Parallel probes in flight")
+	cmd.Flags().BoolVar(&supportedOnly, "supported", false, "Emit only the countries that resolved")
+	cmd.Flags().StringSliceVar(&countries, "country", nil, "Probe these codes instead of the built-in market list (repeatable)")
+	group.AddCommand(cmd)
+}
+
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }

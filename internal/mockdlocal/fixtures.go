@@ -3,6 +3,8 @@ package mockdlocal
 import (
 	"net/http"
 	"strings"
+
+	"github.com/shhac/agent-dlocal/internal/api"
 )
 
 // Fixtures are selected by ID SUFFIX so a test names the scenario it wants
@@ -188,16 +190,6 @@ func handleChargeback(w http.ResponseWriter, r *http.Request, _ []byte) {
 	})
 }
 
-// supportedCountries is a representative slice of dLocal's markets. The real
-// API rejects anything outside its list with 5003, so a mock that accepted any
-// two-letter string would let a bad country code pass here and fail in
-// production — the exact asymmetry a mock exists to prevent.
-var supportedCountries = map[string]bool{
-	"AR": true, "BR": true, "CL": true, "CO": true, "MX": true, "PE": true, "UY": true,
-	"EG": true, "GH": true, "KE": true, "MA": true, "NG": true, "SN": true, "ZA": true,
-	"BD": true, "ID": true, "IN": true, "MY": true, "PH": true, "TH": true, "VN": true,
-}
-
 func handlePaymentMethods(w http.ResponseWriter, r *http.Request, _ []byte) {
 	// The real API distinguishes an ABSENT country (5001, missing parameter)
 	// from an EMPTY or unsupported one (5003, country not supported).
@@ -205,7 +197,11 @@ func handlePaymentMethods(w http.ResponseWriter, r *http.Request, _ []byte) {
 		writeErrorParam(w, http.StatusBadRequest, codeInvalidParameter, "Missing parameter: country", "country")
 		return
 	}
-	if !supportedCountries[r.URL.Query().Get("country")] {
+	// Validated against the same market list the CLI probes, discovered by
+	// probing the real API. A mock that accepted any two-letter string would let
+	// a bad country pass in tests; one with a hand-guessed list would reject
+	// countries that really work. Both asymmetries bite.
+	if !api.IsKnownMarket(r.URL.Query().Get("country")) {
 		writeError(w, http.StatusBadRequest, codeCountryNotSupported, "Country not supported")
 		return
 	}
