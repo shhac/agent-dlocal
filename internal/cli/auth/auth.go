@@ -25,12 +25,12 @@ func Register(root *cobra.Command, globals shared.GlobalsFunc) {
 		Short: "Manage dLocal credentials and profiles",
 	}
 
-	registerAdd(auth, "add", "Add a dLocal profile with keychain-stored credentials")
-	registerAdd(auth, "update", "Replace the stored credentials for a dLocal profile")
+	registerAdd(auth, globals, "add", "Add a dLocal profile with keychain-stored credentials")
+	registerAdd(auth, globals, "update", "Replace the stored credentials for a dLocal profile")
 	registerCheck(auth, globals)
-	registerDefault(auth)
-	registerList(auth)
-	registerRemove(auth)
+	registerDefault(auth, globals)
+	registerList(auth, globals)
+	registerRemove(auth, globals)
 
 	root.AddCommand(auth)
 }
@@ -89,7 +89,7 @@ func (f *credentialFlags) bind(cmd *cobra.Command) {
 	flags.StringVar(&f.country, "country", config.DefaultCountry, "Default country for 'auth check' and payment-method lookups")
 }
 
-func registerAdd(parent *cobra.Command, use, short string) {
+func registerAdd(parent *cobra.Command, globals shared.GlobalsFunc, use, short string) {
 	flags := &credentialFlags{}
 
 	cmd := &cobra.Command{
@@ -142,7 +142,7 @@ func registerAdd(parent *cobra.Command, use, short string) {
 				"payouts_base_url": profile.PayoutsBaseURL,
 				"country":          profile.Country,
 				"mtls":             profile.CertPath != "",
-			}, "")
+			}, globals().Format)
 			return nil
 		},
 	}
@@ -219,7 +219,7 @@ func registerCheck(parent *cobra.Command, globals shared.GlobalsFunc) {
 					"payment_methods_found": countMethods(methods),
 					"signature_scheme":      "V2-HMAC-SHA256",
 					"verified_by":           "GET /payments-methods",
-				}, "")
+				}, flags.Format)
 				return nil
 			})
 		},
@@ -235,7 +235,7 @@ func countMethods(methods any) int {
 	return len(list)
 }
 
-func registerDefault(parent *cobra.Command) {
+func registerDefault(parent *cobra.Command, globals shared.GlobalsFunc) {
 	cmd := &cobra.Command{
 		Use:   "default <profile>",
 		Short: "Set the default profile",
@@ -245,7 +245,7 @@ func registerDefault(parent *cobra.Command) {
 			if err := config.SetDefault(alias); err != nil {
 				return err
 			}
-			shared.WriteItem(map[string]any{"status": "default_set", "profile": alias}, "")
+			shared.WriteItem(map[string]any{"status": "default_set", "profile": alias}, globals().Format)
 			return nil
 		},
 	}
@@ -255,7 +255,7 @@ func registerDefault(parent *cobra.Command) {
 // registerList reports profile metadata only. It calls credential.Storage,
 // which reports WHERE a secret lives without reading it — there is no code path
 // from `auth list` to a secret value.
-func registerList(parent *cobra.Command) {
+func registerList(parent *cobra.Command, globals shared.GlobalsFunc) {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured profiles without exposing secrets",
@@ -283,14 +283,14 @@ func registerList(parent *cobra.Command) {
 			sort.Slice(profiles, func(i, j int) bool {
 				return profiles[i]["profile"].(string) < profiles[j]["profile"].(string)
 			})
-			shared.WriteList(shared.ToAnySlice(profiles), "")
+			shared.WriteList(shared.ToAnySlice(profiles), globals().Format)
 			return nil
 		},
 	}
 	parent.AddCommand(cmd)
 }
 
-func registerRemove(parent *cobra.Command) {
+func registerRemove(parent *cobra.Command, globals shared.GlobalsFunc) {
 	cmd := &cobra.Command{
 		Use:   "remove <profile>",
 		Short: "Remove a profile and its stored credentials",
@@ -303,7 +303,7 @@ func registerRemove(parent *cobra.Command) {
 			if err := config.RemoveProfile(alias); err != nil {
 				return err
 			}
-			shared.WriteItem(map[string]any{"status": "removed", "profile": alias}, "")
+			shared.WriteItem(map[string]any{"status": "removed", "profile": alias}, globals().Format)
 			return nil
 		},
 	}

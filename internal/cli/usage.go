@@ -150,12 +150,16 @@ func registerUsageCommand(root *cobra.Command, globals shared.GlobalsFunc) {
 // registerDomainUsage gives each group its own `usage` subcommand, so an agent
 // already inside a domain can ask what that domain offers without re-reading
 // the whole map.
-func registerDomainUsage(group *cobra.Command, name string, usage domainUsage) {
+//
+// The domain name comes off the usage record rather than a parameter — every
+// call site passed a string equal to usage.Domain, which is two sources of
+// truth waiting to disagree.
+func registerDomainUsage(group *cobra.Command, globals shared.GlobalsFunc, usage domainUsage) {
 	group.AddCommand(&cobra.Command{
 		Use:   "usage",
-		Short: "Show what the " + name + " domain is for",
+		Short: "Show what the " + usage.Domain + " domain is for",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			shared.WriteItem(usage, "")
+			shared.WriteItem(usage, globals().Format)
 			return nil
 		},
 	})

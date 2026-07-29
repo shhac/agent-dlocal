@@ -39,7 +39,7 @@ func registerInvestigate(root *cobra.Command, globals shared.GlobalsFunc) {
 		investigateCmd("payout", "<payout_id>", "Explain where a payout is", investigatePayout, globals),
 	)
 
-	registerDomainUsage(group, "investigate", investigateUsage)
+	registerDomainUsage(group, globals, investigateUsage)
 	root.AddCommand(group)
 }
 

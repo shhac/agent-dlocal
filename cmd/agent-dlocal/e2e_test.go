@@ -282,3 +282,20 @@ func toStrings(value any) []string {
 	}
 	return out
 }
+
+// Several commands used to pass a hardcoded "" as the format, silently
+// discarding the user's --format flag. The flag is part of the CLI's advertised
+// contract, so a command that ignores it is a broken command.
+func TestFormatFlagIsHonouredEverywhere(t *testing.T) {
+	for _, args := range [][]string{
+		{"usage"},
+		{"payments", "usage"},
+		{"investigate", "usage"},
+		{"config", "show"},
+	} {
+		out := runMockCLI(t, append(args, "--format", "yaml")...)
+		if strings.HasPrefix(strings.TrimSpace(out), "{") {
+			t.Errorf("%v --format yaml emitted JSON:\n%s", args, out)
+		}
+	}
+}

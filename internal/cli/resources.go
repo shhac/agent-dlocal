@@ -49,7 +49,7 @@ func registerPayments(root *cobra.Command, globals shared.GlobalsFunc) {
 		},
 	})
 
-	registerDomainUsage(group, "payments", paymentsUsage)
+	registerDomainUsage(group, globals, paymentsUsage)
 	root.AddCommand(group)
 }
 
@@ -74,7 +74,7 @@ func registerOrders(root *cobra.Command, globals shared.GlobalsFunc) {
 		},
 	})
 
-	registerDomainUsage(group, "orders", ordersUsage)
+	registerDomainUsage(group, globals, ordersUsage)
 	root.AddCommand(group)
 }
 
@@ -96,7 +96,7 @@ func registerRefunds(root *cobra.Command, globals shared.GlobalsFunc) {
 		},
 	})
 
-	registerDomainUsage(group, "refunds", refundsUsage)
+	registerDomainUsage(group, globals, refundsUsage)
 	root.AddCommand(group)
 }
 
@@ -118,7 +118,7 @@ func registerChargebacks(root *cobra.Command, globals shared.GlobalsFunc) {
 		},
 	})
 
-	registerDomainUsage(group, "chargebacks", chargebacksUsage)
+	registerDomainUsage(group, globals, chargebacksUsage)
 	root.AddCommand(group)
 }
 
@@ -146,7 +146,7 @@ func registerPayouts(root *cobra.Command, globals shared.GlobalsFunc) {
 		},
 	})
 
-	registerDomainUsage(group, "payouts", payoutsUsage)
+	registerDomainUsage(group, globals, payoutsUsage)
 	root.AddCommand(group)
 }
 
@@ -184,7 +184,7 @@ func registerPaymentMethods(root *cobra.Command, globals shared.GlobalsFunc) {
 	group.AddCommand(list)
 
 	registerCountryDiscovery(group, globals)
-	registerDomainUsage(group, "payment-methods", paymentMethodsUsage)
+	registerDomainUsage(group, globals, paymentMethodsUsage)
 	root.AddCommand(group)
 }
 
