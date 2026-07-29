@@ -75,7 +75,7 @@ func mutualTLSTransport(certPath, keyPath string) (*http.Transport, error) {
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		return nil, agenterrors.Wrap(err, agenterrors.FixableByHuman).
-			WithHint("The certificate and key did not load as a pair; check they match and that the key is unencrypted PEM")
+			WithHint("The certificate and key did not load as a pair. Check they match, and note the key must be UNENCRYPTED PEM — agent-dlocal cannot decrypt a passphrase-protected key, so decrypt it first with 'openssl pkey -in key.pem -out key-decrypted.pem'")
 	}
 	return &http.Transport{
 		TLSClientConfig: &tls.Config{

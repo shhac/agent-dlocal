@@ -39,11 +39,10 @@ func Register(root *cobra.Command, globals shared.GlobalsFunc) {
 // They exist for automation and tests; the README and SKILL steer humans and
 // LLMs to --form so secrets never pass through a transcript.
 type credentialFlags struct {
-	login         string
-	transKey      string
-	secretKey     string
-	keyPassphrase string
-	form          bool
+	login     string
+	transKey  string
+	secretKey string
+	form      bool
 
 	sandbox  bool
 	baseURL  string
@@ -54,10 +53,9 @@ type credentialFlags struct {
 
 func (f *credentialFlags) set() credential.Set {
 	return credential.Set{
-		Login:         f.login,
-		TransKey:      f.transKey,
-		SecretKey:     f.secretKey,
-		KeyPassphrase: f.keyPassphrase,
+		Login:     f.login,
+		TransKey:  f.transKey,
+		SecretKey: f.secretKey,
 	}
 }
 
@@ -81,7 +79,6 @@ func (f *credentialFlags) bind(cmd *cobra.Command) {
 	flags.StringVar(&f.login, "login", "", "X-Login value (prefer --form)")
 	flags.StringVar(&f.transKey, "trans-key", "", "X-Trans-Key value (prefer --form)")
 	flags.StringVar(&f.secretKey, "secret-key", "", "Secret key used for request signing (prefer --form)")
-	flags.StringVar(&f.keyPassphrase, "key-passphrase", "", "Passphrase for the mTLS client key (prefer --form)")
 	flags.BoolVar(&f.sandbox, "sandbox", false, "Point this profile at dLocal sandbox instead of live")
 	flags.StringVar(&f.baseURL, "base-url", "", "Explicit payins base URL, for a merchant on a bespoke host")
 	flags.StringVar(&f.certPath, "cert", "", "Path to the mTLS client certificate (optional; the path is stored, not the file)")
@@ -101,7 +98,7 @@ func registerAdd(parent *cobra.Command, globals shared.GlobalsFunc, use, short s
 
 			set := flags.set()
 			if flags.form {
-				filled, err := promptCredentialsViaDialog(cmd.Context(), alias, set, flags.certPath != "" || flags.keyPath != "")
+				filled, err := promptCredentialsViaDialog(cmd.Context(), alias, set)
 				if err != nil {
 					return err
 				}
@@ -173,9 +170,6 @@ func fillFromStored(alias string, set credential.Set) credential.Set {
 	}
 	if set.SecretKey == "" {
 		set.SecretKey = stored.SecretKey
-	}
-	if set.KeyPassphrase == "" {
-		set.KeyPassphrase = stored.KeyPassphrase
 	}
 	return set
 }

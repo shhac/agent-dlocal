@@ -47,7 +47,7 @@ func withRecorder(t *testing.T, values ...string) *answerer {
 func TestEachPromptTitleNamesTheSecret(t *testing.T) {
 	rec := withRecorder(t, "l", "t", "s")
 
-	if _, err := promptCredentialsViaDialog(context.Background(), "ldt-payins", credential.Set{}, false); err != nil {
+	if _, err := promptCredentialsViaDialog(context.Background(), "ldt-payins", credential.Set{}); err != nil {
 		t.Fatalf("promptCredentialsViaDialog: %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestEachPromptTitleNamesTheSecret(t *testing.T) {
 func TestEachPromptCarriesExactlyOneField(t *testing.T) {
 	rec := withRecorder(t, "l", "t", "s")
 
-	if _, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{}, false); err != nil {
+	if _, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{}); err != nil {
 		t.Fatalf("promptCredentialsViaDialog: %v", err)
 	}
 	for i, call := range rec.Calls {
@@ -87,7 +87,7 @@ func TestEachPromptCarriesExactlyOneField(t *testing.T) {
 func TestPromptsFillEverySecret(t *testing.T) {
 	withRecorder(t, "login123", "trans456", "secret789")
 
-	got, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{}, false)
+	got, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{})
 	if err != nil {
 		t.Fatalf("promptCredentialsViaDialog: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestPromptsFillEverySecret(t *testing.T) {
 func TestPromptsSkipFieldsAlreadySupplied(t *testing.T) {
 	rec := withRecorder(t, "trans456", "secret789")
 
-	got, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{Login: "from-flag"}, false)
+	got, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{Login: "from-flag"})
 	if err != nil {
 		t.Fatalf("promptCredentialsViaDialog: %v", err)
 	}
@@ -118,33 +118,6 @@ func TestPromptsSkipFieldsAlreadySupplied(t *testing.T) {
 	}
 }
 
-// The passphrase is prompted only when a client certificate is configured —
-// it is meaningless without one.
-func TestPassphrasePromptedOnlyWithCert(t *testing.T) {
-	withoutCert := withRecorder(t, "l", "t", "s")
-	if _, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{}, false); err != nil {
-		t.Fatalf("promptCredentialsViaDialog: %v", err)
-	}
-	if len(withoutCert.Calls) != 3 {
-		t.Fatalf("no cert configured but %d prompts were shown", len(withoutCert.Calls))
-	}
-
-	withCert := withRecorder(t, "l", "t", "s", "phrase")
-	got, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{}, true)
-	if err != nil {
-		t.Fatalf("promptCredentialsViaDialog: %v", err)
-	}
-	if len(withCert.Calls) != 4 {
-		t.Fatalf("cert configured but %d prompts were shown, want 4", len(withCert.Calls))
-	}
-	if !strings.Contains(withCert.Calls[3].Title, "passphrase") {
-		t.Errorf("fourth prompt is not the passphrase: %q", withCert.Calls[3].Title)
-	}
-	if got.KeyPassphrase != "phrase" {
-		t.Errorf("passphrase = %q, want phrase", got.KeyPassphrase)
-	}
-}
-
 // A headless environment must fail before any prompt, with a hint naming the
 // non-interactive fallback — an agent cannot open a dialog and needs to be
 // told what to do instead.
@@ -154,7 +127,7 @@ func TestHeadlessFailureNamesTheFallback(t *testing.T) {
 	restore := dialog.SetDefault(rec)
 	t.Cleanup(restore)
 
-	_, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{}, false)
+	_, err := promptCredentialsViaDialog(context.Background(), "prod", credential.Set{})
 	if err == nil {
 		t.Fatal("expected an error when no GUI is available")
 	}

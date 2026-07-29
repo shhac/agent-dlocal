@@ -37,8 +37,9 @@ agent-dlocal auth add sbox --sandbox --form
 agent-dlocal auth add prod --cert ~/.dlocal/client.pem --key ~/.dlocal/client.key --form
 ```
 
-`--cert`/`--key` take **paths**; the files stay where you put them under your own permissions. Only
-the key passphrase is treated as a secret and stored with the rest.
+`--cert`/`--key` take **paths**; the files stay where you put them under your own permissions. The
+client key must be **unencrypted PEM** — Go's TLS loader cannot decrypt a passphrase-protected key,
+so decrypt it first with `openssl pkey -in key.pem -out key-decrypted.pem`.
 
 dLocal keys carry no `test`/`live` marker, so live vs sandbox is a host distinction recorded
 explicitly on the profile — nothing is guessed from the credential.

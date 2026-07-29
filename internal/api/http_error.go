@@ -115,7 +115,7 @@ func classifyHTTPError(status, maxRetries int, body []byte) *agenterrors.APIErro
 		return withHint(agenterrors.New("Credentials rejected: "+message, agenterrors.FixableByHuman),
 			append(hints, "The payouts host rejected the caller outright. Check the credential covers the Payouts product, and that the path exists on this host")...)
 	}
-	if strings.HasSuffix(parsed.Code.Text, "_not_found") || strings.Contains(parsed.Code.Text, "not_found") {
+	if strings.Contains(parsed.Code.Text, "not_found") {
 		return withHint(agenterrors.New("Not found: "+message, agenterrors.FixableByAgent),
 			append(hints, notFoundHint())...)
 	}

@@ -59,17 +59,8 @@ type Format = out.Format
 
 const (
 	FormatJSON   = out.FormatJSON
-	FormatYAML   = out.FormatYAML
 	FormatNDJSON = out.FormatNDJSON
 )
-
-// ParseFormat is the family's lenient parser (accepts "ndjson"/"yml",
-// case-insensitive). Thin wrapper over the shared contract.
-func ParseFormat(s string) (Format, error) { return out.ParseFormat(s) }
-
-// WriteError renders err as the shared {error,fixable_by,hint} contract on w,
-// wrapping a bare error as fixable_by:agent.
-func WriteError(w io.Writer, err error) { out.WriteError(w, err) }
 
 // ResolveFormat keeps the family's one-arg, error-swallowing contract: an
 // unparseable flag falls back to the default rather than surfacing.
@@ -90,15 +81,6 @@ func Print(data any, format Format, prune bool) {
 		return
 	}
 	_ = out.Print(Stdout(), cleaned, format, nil)
-}
-
-func WriteRawJSON(raw json.RawMessage, format Format, prune bool) {
-	var data any
-	if err := json.Unmarshal(raw, &data); err != nil {
-		_ = out.Print(Stdout(), raw, FormatJSON, nil)
-		return
-	}
-	Print(data, format, prune)
 }
 
 func toCleanAny(data any, prune bool) (any, bool) {

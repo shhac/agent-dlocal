@@ -163,7 +163,8 @@ marshalled downstream), and a unit test asserts byte-identity between the signed
 
 dLocal enables client-certificate auth per merchant, layered *on top of* the HMAC headers. With no
 certificate configured the client does plain TLS + HMAC. When configured, the profile carries
-`cert_path` and `key_path`; the key passphrase lives in the keychain with the other secrets.
+`cert_path` and `key_path`. The key must be unencrypted PEM: `tls.LoadX509KeyPair` cannot decrypt
+one, so there is nothing a passphrase could be used for.
 
 Note that mTLS also changes the sandbox host (`sandbox-cert.dlocal.com` rather than
 `sandbox.dlocal.com`), which is another reason the host is explicit profile metadata rather than
@@ -182,12 +183,12 @@ defaults to `live` and takes `--sandbox` to opt out; nothing is inferred from th
 
 ### Credential storage
 
-A dLocal credential set is three secrets (`X-Login`, `X-Trans-Key`, Secret key) plus an optional
-key passphrase. They are marshalled to JSON and stored as **one opaque keychain item per profile**
+A dLocal credential set is three secrets: `X-Login`, `X-Trans-Key`, and the Secret key. They are
+marshalled to JSON and stored as **one opaque keychain item per profile**
 under service `app.paulie.agent-dlocal`:
 
 ```json
-{"login": "...", "trans_key": "...", "secret_key": "...", "key_passphrase": "..."}
+{"login": "...", "trans_key": "...", "secret_key": "..."}
 ```
 
 One item, one `Remove`, no partial-write window. The non-secret `credentials.json` index keeps one
@@ -237,10 +238,18 @@ transcript or a model's context.
 **The certificate is not a form field.** `dialog.InputType` is `Text | Password` — single-line
 entries only. A PEM or `.jks` cannot sanely be typed into one, and a *path* is not a secret. So
 `--cert`/`--key` take paths, stored as non-secret profile metadata; the key file stays where the
-user put it under their own file permissions. **The key passphrase is a form field** — short,
+user put it under their own file permissions.
+
+> **Removed after the structural review.** There was a fourth secret here — a client-key passphrase,
+> collected by `--key-passphrase`, by a dialog field, and by `DLOCAL_KEY_PASSPHRASE`, backfilled on
+> update and persisted to the keychain. **Nothing ever read it.** mTLS goes through
+> `tls.LoadX509KeyPair`, which cannot decrypt an encrypted key — the error hint already told users
+> the key had to be unencrypted PEM. Prompting a user for a secret, storing it, and discarding it is
+> worse than not offering the feature, so the whole path is gone and the hint now names the
+> `openssl pkey` fix. Original text follows for the record: **The key passphrase is a form field** — short,
 single-line, genuinely secret.
 
-Non-interactive equivalents (`--login`, `--trans-key`, `--secret-key`, `--key-passphrase`) exist for
+Non-interactive equivalents (`--login`, `--trans-key`, `--secret-key`) exist for
 automation and tests, but the README and SKILL steer humans and LLMs to `--form`.
 
 Dialog failures are classified with `dialog.ClassifyError` into `fixable_by` + hint, including a

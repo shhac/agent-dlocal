@@ -255,7 +255,11 @@ func writeFailure(w http.ResponseWriter, f *authFailure) {
 	payload := map[string]any{"message": f.message}
 	if f.textCode != "" {
 		payload["code"] = f.textCode
-		payload["field"] = f.param
+		// Only when there is one: the real API omits "field" rather than
+		// sending it empty, and no string-code rejection names a field.
+		if f.param != "" {
+			payload["field"] = f.param
+		}
 	} else {
 		payload["code"] = f.code
 		if f.param != "" {

@@ -38,12 +38,6 @@ var credentialFields = []credentialField{
 	},
 }
 
-var passphraseField = credentialField{
-	id: "key_passphrase", label: "Client key passphrase (for mTLS)",
-	needed: func(s credential.Set) bool { return s.KeyPassphrase == "" },
-	assign: func(s *credential.Set, v string) { s.KeyPassphrase = v },
-}
-
 // promptCredentialsViaDialog collects the missing secrets through native OS
 // dialogs, so the values go from the user's keyboard into the keychain without
 // passing through the transcript or the model's context.
@@ -66,15 +60,16 @@ var passphraseField = credentialField{
 // The client certificate is deliberately not collected here. dialog.InputType
 // is Text | Password — single-line entries — and neither a PEM blob nor a .jks
 // can sanely be typed into one. A path is also not a secret, so --cert/--key
-// take paths. The key PASSPHRASE is prompted: short, single-line, and secret.
-func promptCredentialsViaDialog(ctx context.Context, profile string, set credential.Set, wantPassphrase bool) (credential.Set, error) {
-	fields := credentialFields
-	if wantPassphrase {
-		fields = append(append([]credentialField{}, fields...), passphraseField)
-	}
-
-	pending := make([]credentialField, 0, len(fields))
-	for _, field := range fields {
+// take paths.
+//
+// Nor is a key passphrase collected. There used to be a fourth field for one,
+// but nothing ever read it: mTLS goes through tls.LoadX509KeyPair, which cannot
+// decrypt an encrypted key. Prompting for a secret and then discarding it is
+// worse than not supporting the feature, so the client key must be unencrypted
+// PEM and the error hint says so.
+func promptCredentialsViaDialog(ctx context.Context, profile string, set credential.Set) (credential.Set, error) {
+	pending := make([]credentialField, 0, len(credentialFields))
+	for _, field := range credentialFields {
 		if field.needed(set) {
 			pending = append(pending, field)
 		}

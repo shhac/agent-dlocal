@@ -17,9 +17,6 @@ type RedactionOptions struct {
 // out.RedactedPlaceholder so callers and tests can refer to either.
 const RedactedString = out.RedactedPlaceholder
 
-// RedactionNote re-exports the shared note shape (the @redacted list entry).
-type RedactionNote = out.RedactionNote
-
 // ParseExpose splits comma-joined --expose entries into normalized tokens.
 func ParseExpose(values []string) []string {
 	var result []string

@@ -87,13 +87,12 @@ func TestAddNeverEchoesSecrets(t *testing.T) {
 	withStubbedStore(t)
 
 	out, err := runAuth(t, "auth", "add", "prod",
-		"--login", "login123", "--trans-key", "trans456", "--secret-key", "secret789",
-		"--key-passphrase", "phrase000")
+		"--login", "login123", "--trans-key", "trans456", "--secret-key", "secret789")
 	if err != nil {
 		t.Fatalf("auth add: %v", err)
 	}
 
-	for _, secret := range []string{"login123", "trans456", "secret789", "phrase000"} {
+	for _, secret := range []string{"login123", "trans456", "secret789"} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("auth add echoed %q into stdout:\n%s", secret, out)
 		}
@@ -124,7 +123,7 @@ func TestAddSandboxSelectsSandboxHosts(t *testing.T) {
 // The cert is a PATH on the profile, never a secret in the keychain — a PEM
 // cannot be typed into a single-line dialog field and a path is not sensitive.
 func TestAddStoresCertPathNotCertContents(t *testing.T) {
-	calls := withStubbedStore(t)
+	withStubbedStore(t)
 
 	if _, err := runAuth(t, "auth", "add", "prod", "--sandbox",
 		"--login", "l", "--trans-key", "t", "--secret-key", "s",
@@ -139,9 +138,6 @@ func TestAddStoresCertPathNotCertContents(t *testing.T) {
 	// A configured cert moves the sandbox to the mTLS host.
 	if profile.BaseURL != config.SandboxCertBaseURL {
 		t.Fatalf("base_url = %q, want the mTLS sandbox host %q", profile.BaseURL, config.SandboxCertBaseURL)
-	}
-	if set := (*calls)[0].set; set.KeyPassphrase != "" {
-		t.Fatalf("no passphrase was supplied but one was stored: %q", set.KeyPassphrase)
 	}
 }
 

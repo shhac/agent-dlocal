@@ -1,8 +1,8 @@
 // Package credential stores one dLocal credential set per profile.
 //
-// A dLocal credential set is not a single string: it is X-Login, X-Trans-Key, a
-// Secret key used only for signing, and optionally a client-key passphrase. All
-// of them are marshalled into ONE opaque keychain item per profile, rather than
+// A dLocal credential set is not a single string: it is X-Login, X-Trans-Key,
+// and a Secret key used only for signing. All three are marshalled into ONE
+// opaque keychain item per profile, rather than
 // suffixed items (profile.login, profile.secret, ...). One item means one
 // Delete: there is no partial-write window and no way for a Remove to miss a
 // suffix and leave a live secret behind.
@@ -29,14 +29,12 @@ const keychainSentinel = "__KEYCHAIN__"
 // Set is one merchant's credentials. It is only ever handled as a whole: read
 // from the backend, handed to the signer, discarded.
 type Set struct {
-	Login         string `json:"login"`
-	TransKey      string `json:"trans_key"`
-	SecretKey     string `json:"secret_key"`
-	KeyPassphrase string `json:"key_passphrase,omitempty"`
+	Login     string `json:"login"`
+	TransKey  string `json:"trans_key"`
+	SecretKey string `json:"secret_key"`
 }
 
-// Complete reports whether the three required secrets are present. The key
-// passphrase is optional — it only matters when mTLS is configured.
+// Complete reports whether all three secrets are present.
 func (s Set) Complete() bool {
 	return s.Login != "" && s.TransKey != "" && s.SecretKey != ""
 }

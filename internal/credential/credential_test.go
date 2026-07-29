@@ -57,10 +57,9 @@ func withTestEnv(t *testing.T) *fakeKeychain {
 
 func sampleSet() Set {
 	return Set{
-		Login:         "login123",
-		TransKey:      "trans456",
-		SecretKey:     "secret789",
-		KeyPassphrase: "phrase000",
+		Login:     "login123",
+		TransKey:  "trans456",
+		SecretKey: "secret789",
 	}
 }
 
@@ -152,7 +151,7 @@ func TestIndexHoldsNoSecretWhenKeychainManaged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read credentials.json: %v", err)
 	}
-	for _, secret := range []string{"login123", "trans456", "secret789", "phrase000"} {
+	for _, secret := range []string{"login123", "trans456", "secret789"} {
 		if strings.Contains(string(data), secret) {
 			t.Fatalf("credentials.json leaked %q:\n%s", secret, data)
 		}

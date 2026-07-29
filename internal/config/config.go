@@ -199,16 +199,6 @@ func SetDefault(alias string) error {
 	return Write(cfg)
 }
 
-func UpdateProfile(alias string, update func(Profile) Profile) error {
-	cfg := Read()
-	profile, ok := cfg.Profiles[alias]
-	if !ok {
-		return fmt.Errorf("profile %q is not configured", alias)
-	}
-	cfg.Profiles[alias] = Normalize(update(profile))
-	return Write(cfg)
-}
-
 // defaultAccessors is the single definition of the settable config keys.
 //
 // This used to be four parallel switches across two packages — get, set, unset,

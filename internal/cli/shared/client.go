@@ -75,10 +75,9 @@ func ResolveProfile(flags *GlobalFlags) (*ResolvedProfile, error) {
 // otherwise fail later as an opaque 401.
 func credentialsFromEnv() (credential.Set, bool) {
 	set := credential.Set{
-		Login:         os.Getenv("DLOCAL_X_LOGIN"),
-		TransKey:      os.Getenv("DLOCAL_X_TRANS_KEY"),
-		SecretKey:     os.Getenv("DLOCAL_SECRET_KEY"),
-		KeyPassphrase: os.Getenv("DLOCAL_KEY_PASSPHRASE"),
+		Login:     os.Getenv("DLOCAL_X_LOGIN"),
+		TransKey:  os.Getenv("DLOCAL_X_TRANS_KEY"),
+		SecretKey: os.Getenv("DLOCAL_SECRET_KEY"),
 	}
 	return set, set.Complete()
 }
