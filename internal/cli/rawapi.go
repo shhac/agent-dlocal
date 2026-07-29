@@ -45,10 +45,11 @@ func registerRawAPI(root *cobra.Command, globals shared.GlobalsFunc) {
 				return err
 			}
 
+			host := shared.HostPayins
 			if payouts {
-				return shared.GetPayoutRawItem(flags, path, params)
+				host = shared.HostPayouts
 			}
-			return shared.GetRawItem(flags, path, params)
+			return shared.GetRawItem(flags, host, path, params)
 		},
 	}
 	get.Flags().StringArrayVar(&query, "query", nil, "Query parameter as key=value (repeatable)")

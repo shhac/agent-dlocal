@@ -30,16 +30,16 @@ func TestPayinsSignatureMatchesDocsVector(t *testing.T) {
 	}
 }
 
-func TestPayinsSignerSignsLoginDateBody(t *testing.T) {
-	signer := PayinsSigner{
-		Creds:     Credentials{Login: docsLogin, TransKey: "j81xh5", SecretKey: docsSecret},
-		UserAgent: "agent-dlocal/test",
+func TestSignSignsLoginDateBody(t *testing.T) {
+	client := &Client{
+		creds:     Credentials{Login: docsLogin, TransKey: "j81xh5", SecretKey: docsSecret},
+		userAgent: "agent-dlocal/test",
 	}
 	header := http.Header{}
 	body := []byte(`{"amount":100}`)
 	now := time.Date(2022, 11, 24, 15, 42, 57, 130_000_000, time.UTC)
 
-	signer.Apply(header, body, now)
+	client.sign(header, body, now)
 
 	if got := header.Get("X-Date"); got != docsDate {
 		t.Fatalf("X-Date = %q, want %q", got, docsDate)
@@ -63,8 +63,8 @@ func TestPayinsSignerSignsLoginDateBody(t *testing.T) {
 // signer from the documentation.
 func TestNoPayloadSignatureHeaderIsEverSent(t *testing.T) {
 	header := http.Header{}
-	PayinsSigner{Creds: Credentials{Login: docsLogin, SecretKey: docsSecret}, UserAgent: "agent-dlocal/test"}.
-		Apply(header, []byte(`{"amount":100}`), time.Now())
+	client := &Client{creds: Credentials{Login: docsLogin, SecretKey: docsSecret}, userAgent: "agent-dlocal/test"}
+	client.sign(header, []byte(`{"amount":100}`), time.Now())
 
 	if header.Get("Payload-Signature") != "" {
 		t.Fatal("a Payload-Signature header was set; the payouts host rejects that scheme with 401")

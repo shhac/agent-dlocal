@@ -16,27 +16,17 @@ import (
 // looks right and signs wrong.
 const dateLayout = "2006-01-02T15:04:05.000"
 
-// Credentials are the three secrets a signer needs. The key passphrase is not
-// here: it belongs to the TLS layer, not the signing layer.
+// Credentials are the three secrets used to sign a request. The key passphrase
+// is not here: it belongs to the TLS layer, not the signing layer.
 type Credentials struct {
 	Login     string
 	TransKey  string
 	SecretKey string
 }
 
-// Signer applies the auth headers for one dLocal API family.
-//
-// Payins and payouts v2 are separate implementations rather than one signer
-// with a flag, because they do not merely put the same digest in a different
-// header — they hash DIFFERENT MESSAGES. Payins signs login+date+body; payouts
-// v2 signs the body alone. Collapsing them into one type invites a boolean that
-// silently produces a valid-looking signature over the wrong input.
-type Signer interface {
-	// Apply sets the auth headers for a request carrying exactly body.
-	Apply(header http.Header, body []byte, now time.Time)
-	// Name identifies the scheme in debug output.
-	Name() string
-}
+// SignatureScheme is the value dLocal expects in the Authorization header, and
+// the name reported in debug output and by `auth check`.
+const SignatureScheme = "V2-HMAC-SHA256"
 
 func FormatDate(now time.Time) string {
 	return now.UTC().Format(dateLayout) + "Z"
@@ -48,53 +38,39 @@ func hmacHex(secret string, message []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// PayinsSigner implements dLocal's V2-HMAC-SHA256 scheme:
+// sign applies dLocal's V2-HMAC-SHA256 scheme:
 //
 //	signature = hex_lower(HMAC_SHA256(secretKey, X-Login || X-Date || body))
 //
-// carried in Authorization as "V2-HMAC-SHA256, Signature: <hex>".
-type PayinsSigner struct {
-	Creds     Credentials
-	UserAgent string
-}
-
-func (s PayinsSigner) Name() string { return "V2-HMAC-SHA256" }
-
-func (s PayinsSigner) Apply(header http.Header, body []byte, now time.Time) {
+// carried in Authorization. Both the payins and the payouts host accept it —
+// there is only one scheme.
+//
+// An earlier version modelled this as a Signer interface with two
+// implementations, the second being the Payload-Signature scheme the
+// documentation describes for Payouts v2. Live testing disproved it: the
+// payouts host rejects Payload-Signature with 401 invalid_credentials and
+// accepts this header (404 payout_not_found_id, i.e. auth passed), while a
+// corrupted digest gets 403 authentication_failed — so the signature is
+// genuinely verified. Payouts differ from payins by HOST only.
+//
+// The interface outlived its second implementation, justified on a hypothetical
+// Payouts v3. That is not the seam v3 would need: OAuth2 bearer tokens require a
+// token acquisition and refresh story, not a different Apply(header, body, now).
+func (c *Client) sign(header http.Header, body []byte, now time.Time) {
 	date := FormatDate(now)
 
-	header.Set("X-Login", s.Creds.Login)
-	header.Set("X-Trans-Key", s.Creds.TransKey)
+	header.Set("X-Login", c.creds.Login)
+	header.Set("X-Trans-Key", c.creds.TransKey)
 	header.Set("X-Date", date)
 	header.Set("X-Version", apiVersion)
-	header.Set("User-Agent", s.UserAgent)
+	header.Set("User-Agent", c.userAgent)
 	header.Set("Content-Type", "application/json")
 	header.Set("Accept", "application/json")
 
-	message := make([]byte, 0, len(s.Creds.Login)+len(date)+len(body))
-	message = append(message, s.Creds.Login...)
+	message := make([]byte, 0, len(c.creds.Login)+len(date)+len(body))
+	message = append(message, c.creds.Login...)
 	message = append(message, date...)
 	message = append(message, body...)
 
-	header.Set("Authorization", "V2-HMAC-SHA256, Signature: "+hmacHex(s.Creds.SecretKey, message))
+	header.Set("Authorization", SignatureScheme+", Signature: "+hmacHex(c.creds.SecretKey, message))
 }
-
-// NOTE: there is no PayoutsSigner.
-//
-// An earlier version of this package had one, implementing the Payouts v2
-// scheme the documentation describes: HMAC over the body ALONE, carried in a
-// Payload-Signature header. Tested against the live sandbox, the payouts host
-// rejects that with 401 invalid_credentials and accepts the ordinary payins
-// Authorization header instead:
-//
-//	Payload-Signature = HMAC(body)            -> 401 invalid_credentials
-//	Payload-Signature = HMAC(login+date)      -> 401 invalid_credentials
-//	no signature header                       -> 401 invalid_credentials
-//	Authorization: V2-HMAC-SHA256 (payins)    -> 404 payout_not_found_id  <- auth passed
-//
-// with a corrupted payins signature returning 403 authentication_failed, so the
-// signature is genuinely being verified rather than ignored.
-//
-// Payouts therefore differ from payins only by HOST, not by signing scheme. The
-// Signer interface is kept because Payouts v3 — which uses OAuth2 bearer tokens
-// rather than signatures — would be a genuine second implementation.

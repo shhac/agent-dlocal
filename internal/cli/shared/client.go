@@ -95,32 +95,108 @@ func baseURL(flags *GlobalFlags, profileURL string) string {
 	return firstNonEmpty(flags.BaseURL, os.Getenv("AGENT_DLOCAL_BASE_URL"), profileURL)
 }
 
-func WithClient(flags *GlobalFlags, fn func(context.Context, *api.Client) error) error {
+// Host selects which dLocal service a command talks to. Payins and payouts
+// differ by HOST ONLY — same credentials, same signing scheme (see the note in
+// internal/api/signer.go) — so this is a data value rather than a parallel set
+// of constructors.
+//
+// There used to be eight entry points here (With/WithPayouts/WithResolved/
+// WithResolvedProfile × Get/GetPayout for entities and raw items), varying
+// along this single axis. They were parallel constructors from when payouts
+// genuinely needed a different signer as well as a different host; once the
+// signer difference was disproved, only a URL field remained.
+type Host int
+
+const (
+	HostPayins Host = iota
+	HostPayouts
+)
+
+func (h Host) baseURL(profile config.Profile) string {
+	if h == HostPayouts {
+		return profile.PayoutsBaseURL
+	}
+	return profile.BaseURL
+}
+
+// Session is what a command needs to do its work: a configured client plus the
+// non-secret profile metadata some commands report or default from.
+type Session struct {
+	Client  *api.Client
+	Profile config.Profile
+	Alias   string
+	Source  string
+	// BaseURL is the host actually in use after --base-url and the env override
+	// are applied — not the profile's stored one. `auth check` reports it, and
+	// reporting the stored URL while verifying against another is how a check
+	// ends up naming the wrong ledger.
+	BaseURL string
+}
+
+// WithSession resolves the profile, builds a client for the chosen host, and
+// runs fn.
+func WithSession(flags *GlobalFlags, host Host, fn func(context.Context, *Session) error) error {
 	resolved, err := ResolveProfile(flags)
 	if err != nil {
 		return err
 	}
-	signer := api.PayinsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
-	return withClient(flags, resolved, baseURL(flags, resolved.Profile.BaseURL), signer, fn)
-}
 
-// WithPayoutsClient targets the payouts host. It differs from the payins client
-// by HOST ONLY — the signing scheme is identical, confirmed against the live
-// sandbox (see the note in internal/api/signer.go). It stays a separate
-// constructor because the base URL differs and because Payouts v3, which uses
-// OAuth2 rather than signatures, would plug in here.
-func WithPayoutsClient(flags *GlobalFlags, fn func(context.Context, *api.Client) error) error {
-	resolved, err := ResolveProfile(flags)
+	url := baseURL(flags, host.baseURL(resolved.Profile))
+	if flags.Debug {
+		// Nothing here is a secret: the profile alias, the backend that holds
+		// the credentials, and the host. Never the credentials themselves.
+		WriteDebug(map[string]any{
+			"@debug":            "client",
+			"profile":           resolved.Alias,
+			"credential_source": resolved.CredentialSource,
+			"environment":       resolved.Profile.Environment,
+			"base_url":          url,
+			"signer":            api.SignatureScheme,
+			"mtls":              resolved.Profile.CertPath != "",
+			"timeout_ms":        flags.TimeoutMS,
+			"max_retries":       flags.MaxRetries,
+		})
+	}
+
+	client, err := api.NewClient(api.Options{
+		BaseURL:     url,
+		Credentials: signingCredentials(resolved),
+		UserAgent:   UserAgent,
+		MaxRetries:  flags.MaxRetries,
+		CertPath:    resolved.Profile.CertPath,
+		KeyPath:     resolved.Profile.KeyPath,
+	})
 	if err != nil {
 		return err
 	}
-	signer := api.PayinsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
-	return withClient(flags, resolved, baseURL(flags, resolved.Profile.PayoutsBaseURL), signer, fn)
+	client.SetDebug(flags.Debug)
+	client.SetDebugRedaction(RedactionOptions(flags))
+
+	ctx, cancel := ContextWithTimeout(context.Background(), flags.TimeoutMS)
+	defer cancel()
+
+	return fn(ctx, &Session{
+		Client:  client,
+		Profile: resolved.Profile,
+		Alias:   resolved.Alias,
+		Source:  resolved.CredentialSource,
+		BaseURL: url,
+	})
 }
 
-func WithResolvedClient(flags *GlobalFlags, resolved *ResolvedProfile, fn func(context.Context, *api.Client) error) error {
-	signer := api.PayinsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
-	return withClient(flags, resolved, baseURL(flags, resolved.Profile.BaseURL), signer, fn)
+// WithSessionResult is WithSession for a command that produces a value.
+//
+// Without it every caller has to declare an outer variable, assign it inside
+// the closure and return it afterwards — a workaround for an error-only
+// contract that four investigate commands each copied.
+func WithSessionResult[T any](flags *GlobalFlags, host Host, fn func(context.Context, *Session) (T, error)) (T, error) {
+	var result T
+	err := WithSession(flags, host, func(ctx context.Context, session *Session) error {
+		var err error
+		result, err = fn(ctx, session)
+		return err
+	})
+	return result, err
 }
 
 func signingCredentials(resolved *ResolvedProfile) api.Credentials {
@@ -131,60 +207,10 @@ func signingCredentials(resolved *ResolvedProfile) api.Credentials {
 	}
 }
 
-func withClient(flags *GlobalFlags, resolved *ResolvedProfile, url string, signer api.Signer, fn func(context.Context, *api.Client) error) error {
-	if flags.Debug {
-		// Nothing here is a secret: the profile alias, the backend that holds
-		// the credentials, and the host. Never the credentials themselves.
-		WriteDebug(map[string]any{
-			"@debug":            "client",
-			"profile":           resolved.Alias,
-			"credential_source": resolved.CredentialSource,
-			"environment":       resolved.Profile.Environment,
-			"base_url":          url,
-			"signer":            signer.Name(),
-			"mtls":              resolved.Profile.CertPath != "",
-			"timeout_ms":        flags.TimeoutMS,
-			"max_retries":       flags.MaxRetries,
-		})
-	}
-
-	client, err := api.NewClient(api.Options{
-		BaseURL:    url,
-		Signer:     signer,
-		MaxRetries: flags.MaxRetries,
-		CertPath:   resolved.Profile.CertPath,
-		KeyPath:    resolved.Profile.KeyPath,
-	})
-	if err != nil {
-		return err
-	}
-	client.SetDebug(flags.Debug)
-	client.SetDebugRedaction(RedactionOptions(flags))
-
-	ctx, cancel := ContextWithTimeout(context.Background(), flags.TimeoutMS)
-	defer cancel()
-	return fn(ctx, client)
-}
-
-// GetRawItem fetches one path from the payins host and writes the redacted
-// result.
-func GetRawItem(flags *GlobalFlags, path string, params url.Values) error {
-	return writeFetched(flags, path, params, WithClient)
-}
-
-// GetPayoutRawItem is GetRawItem against the payouts host and signer.
-func GetPayoutRawItem(flags *GlobalFlags, path string, params url.Values) error {
-	return writeFetched(flags, path, params, WithPayoutsClient)
-}
-
-func writeFetched(
-	flags *GlobalFlags,
-	path string,
-	params url.Values,
-	with func(*GlobalFlags, func(context.Context, *api.Client) error) error,
-) error {
-	return with(flags, func(ctx context.Context, client *api.Client) error {
-		item, err := FetchItem(ctx, client, flags, path, params)
+// GetRawItem fetches one path and writes the redacted result.
+func GetRawItem(flags *GlobalFlags, host Host, path string, params url.Values) error {
+	return WithSession(flags, host, func(ctx context.Context, session *Session) error {
+		item, err := FetchItem(ctx, session.Client, flags, path, params)
 		if err != nil {
 			return err
 		}
@@ -211,18 +237,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// WithResolvedProfile is WithClient plus the resolved profile, for commands
-// whose behaviour depends on non-secret profile metadata (currently the
-// default country).
-func WithResolvedProfile(flags *GlobalFlags, fn func(context.Context, *api.Client, config.Profile) error) error {
-	resolved, err := ResolveProfile(flags)
-	if err != nil {
-		return err
-	}
-	signer := api.PayinsSigner{Creds: signingCredentials(resolved), UserAgent: UserAgent}
-	return withClient(flags, resolved, baseURL(flags, resolved.Profile.BaseURL), signer, func(ctx context.Context, client *api.Client) error {
-		return fn(ctx, client, resolved.Profile)
-	})
 }

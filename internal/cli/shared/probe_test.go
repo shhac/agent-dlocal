@@ -15,7 +15,7 @@ func probeClient(t *testing.T, handler http.HandlerFunc) *api.Client {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	client, err := api.NewClient(api.Options{BaseURL: server.URL, Signer: api.PayinsSigner{}})
+	client, err := api.NewClient(api.Options{BaseURL: server.URL})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

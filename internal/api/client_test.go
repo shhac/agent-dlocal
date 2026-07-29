@@ -20,9 +20,9 @@ func testCreds() Credentials {
 	return Credentials{Login: "login123", TransKey: "trans456", SecretKey: "secret789"}
 }
 
-func newTestClient(t *testing.T, baseURL string, signer Signer) *Client {
+func newTestClient(t *testing.T, baseURL string, creds Credentials) *Client {
 	t.Helper()
-	client, err := NewClient(Options{BaseURL: baseURL, Signer: signer, MaxRetries: 0})
+	client, err := NewClient(Options{BaseURL: baseURL, Credentials: creds, UserAgent: "agent-dlocal/test", MaxRetries: 0})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestSignatureVerifiesAgainstBytesOnTheWire(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestClient(t, server.URL, PayinsSigner{Creds: testCreds(), UserAgent: "agent-dlocal/test"})
+	client := newTestClient(t, server.URL, testCreds())
 	if _, err := client.Get(context.Background(), "/payments/D-4-abc", url.Values{}); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestGetSendsRequiredHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestClient(t, server.URL, PayinsSigner{Creds: testCreds(), UserAgent: "agent-dlocal/test"})
+	client := newTestClient(t, server.URL, testCreds())
 	if _, err := client.Get(context.Background(), "/payments/D-4-abc", url.Values{}); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestGetEncodesQueryParams(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestClient(t, server.URL, PayinsSigner{Creds: testCreds()})
+	client := newTestClient(t, server.URL, testCreds())
 	if _, err := client.Get(context.Background(), "/payments-methods", url.Values{"country": {"BR"}}); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -185,7 +185,7 @@ func errFor(t *testing.T, status int, body string) *agenterrors.APIError {
 	}))
 	t.Cleanup(server.Close)
 
-	client := newTestClient(t, server.URL, PayinsSigner{Creds: testCreds()})
+	client := newTestClient(t, server.URL, testCreds())
 	_, err := client.Get(context.Background(), "/probe", url.Values{})
 	if err == nil {
 		t.Fatalf("expected an error for HTTP %d", status)
@@ -204,7 +204,7 @@ func TestNotFoundIsAgentFixable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newTestClient(t, server.URL, PayinsSigner{Creds: testCreds()})
+	client := newTestClient(t, server.URL, testCreds())
 	_, err := client.Get(context.Background(), "/payments/nope", url.Values{})
 
 	apiErr, ok := err.(*agenterrors.APIError)
@@ -234,7 +234,7 @@ func TestRetriesTransientFailuresThenSucceeds(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(Options{BaseURL: server.URL, Signer: PayinsSigner{Creds: testCreds()}, MaxRetries: 2})
+	client, err := NewClient(Options{BaseURL: server.URL, Credentials: testCreds(), MaxRetries: 2})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestRetriesAreBoundedByMaxRetries(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(Options{BaseURL: server.URL, Signer: PayinsSigner{Creds: testCreds()}, MaxRetries: 1})
+	client, err := NewClient(Options{BaseURL: server.URL, Credentials: testCreds(), MaxRetries: 1})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -270,28 +270,11 @@ func TestRetriesAreBoundedByMaxRetries(t *testing.T) {
 }
 
 func TestMutualTLSRequiresBothCertAndKey(t *testing.T) {
-	_, err := NewClient(Options{BaseURL: "https://example.test", Signer: PayinsSigner{}, CertPath: "/tmp/only-a-cert.pem"})
+	_, err := NewClient(Options{BaseURL: "https://example.test", CertPath: "/tmp/only-a-cert.pem"})
 	if err == nil {
 		t.Fatal("NewClient accepted a certificate with no key")
 	}
 	if !strings.Contains(err.Error(), "certificate and a key") {
 		t.Fatalf("error should name the missing half: %v", err)
-	}
-}
-
-func TestSafeHeadersMasksCredentials(t *testing.T) {
-	header := http.Header{}
-	PayinsSigner{Creds: testCreds(), UserAgent: "agent-dlocal/test"}.Apply(header, nil, time.Now())
-	header.Set("Payload-Signature", "cafebabe")
-
-	safe := SafeHeaders(header)
-
-	for _, name := range []string{"Authorization", "X-Login", "X-Trans-Key", "Payload-Signature"} {
-		if got := safe[http.CanonicalHeaderKey(name)]; got != "[REDACTED]" {
-			t.Errorf("SafeHeaders kept %s = %q", name, got)
-		}
-	}
-	if safe["User-Agent"] != "agent-dlocal/test" {
-		t.Errorf("SafeHeaders masked a non-secret header: User-Agent = %q", safe["User-Agent"])
 	}
 }

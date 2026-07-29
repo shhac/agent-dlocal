@@ -19,7 +19,8 @@ const apiVersion = "2.1"
 
 type Client struct {
 	baseURL    string
-	signer     Signer
+	creds      Credentials
+	userAgent  string
 	maxRetries int
 	http       *http.Client
 	debug      bool
@@ -28,9 +29,10 @@ type Client struct {
 }
 
 type Options struct {
-	BaseURL    string
-	Signer     Signer
-	MaxRetries int
+	BaseURL     string
+	Credentials Credentials
+	UserAgent   string
+	MaxRetries  int
 	// CertPath/KeyPath enable mutual TLS. dLocal turns client-certificate auth
 	// on per merchant, layered on top of the HMAC headers — with neither set,
 	// the client does plain TLS + HMAC.
@@ -50,7 +52,8 @@ func NewClient(opts Options) (*Client, error) {
 
 	return &Client{
 		baseURL:    strings.TrimRight(opts.BaseURL, "/"),
-		signer:     opts.Signer,
+		creds:      opts.Credentials,
+		userAgent:  opts.UserAgent,
 		maxRetries: nonNegative(opts.MaxRetries),
 		http:       httpClient,
 		now:        time.Now,
@@ -181,7 +184,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, body []b
 		return nil, agenterrors.Wrap(err, agenterrors.FixableByAgent)
 	}
 
-	c.signer.Apply(req.Header, body, c.now())
+	c.sign(req.Header, body, c.now())
 	return req, nil
 }
 

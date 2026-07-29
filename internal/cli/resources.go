@@ -9,145 +9,117 @@ import (
 
 	"github.com/shhac/agent-dlocal/internal/api"
 	"github.com/shhac/agent-dlocal/internal/cli/shared"
-	"github.com/shhac/agent-dlocal/internal/config"
 )
 
 // Every command here is a GET. dLocal's read surface is retrieve-by-id, so the
 // verbs are `get` and `status` — there is no list endpoint to wrap, and
 // inventing a client-side one would misrepresent the API.
 
-func registerPayments(root *cobra.Command, globals shared.GlobalsFunc) {
-	group := &cobra.Command{
-		Use:   "payments",
-		Short: "Retrieve dLocal payments",
-	}
+// getSpec describes one retrieve-by-id subcommand. The five resource groups
+// differ only in these fields, so they are data rather than five copies of the
+// same eighteen lines — including the host, which is the whole of the
+// payins/payouts difference.
+type getSpec struct {
+	use        string
+	short      string
+	long       string
+	pathPrefix string
+	pathSuffix string
+	host       shared.Host
+}
 
+// newResourceGroup builds a command group and wires its usage subcommand, so
+// the group/usage/AddCommand tail is written once rather than per resource.
+func newResourceGroup(root *cobra.Command, globals shared.GlobalsFunc, short, long string, usage domainUsage) *cobra.Command {
+	group := &cobra.Command{Use: usage.Domain, Short: short, Long: long}
+	registerDomainUsage(group, globals, usage)
+	root.AddCommand(group)
+	return group
+}
+
+func addGetCommand(group *cobra.Command, globals shared.GlobalsFunc, spec getSpec) {
 	group.AddCommand(&cobra.Command{
-		Use:   "get <payment_id>...",
-		Short: "Retrieve full payment records by id",
+		Use:   spec.use,
+		Short: spec.short,
+		Long:  spec.long,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := globals()
-			return shared.GetEntities(flags, args, func(ctx context.Context, client *api.Client, id string) (any, error) {
-				return shared.FetchItem(ctx, client, flags, "/payments/"+url.PathEscape(id), nil)
+			return shared.GetEntities(flags, spec.host, args, func(ctx context.Context, session *shared.Session, id string) (any, error) {
+				return shared.FetchItem(ctx, session.Client, flags, spec.pathPrefix+url.PathEscape(id)+spec.pathSuffix, nil)
 			})
 		},
 	})
+}
 
-	group.AddCommand(&cobra.Command{
-		Use:   "status <payment_id>...",
-		Short: "Retrieve just the status triple for payments (cheaper than get)",
-		Long: "Retrieve just the status/status_code/status_detail triple.\n\n" +
+func registerPayments(root *cobra.Command, globals shared.GlobalsFunc) {
+	group := newResourceGroup(root, globals, "Retrieve dLocal payments", "", paymentsUsage)
+
+	addGetCommand(group, globals, getSpec{
+		use:        "get <payment_id>...",
+		short:      "Retrieve full payment records by id",
+		pathPrefix: "/payments/",
+	})
+	addGetCommand(group, globals, getSpec{
+		use:   "status <payment_id>...",
+		short: "Retrieve just the status triple for payments (cheaper than get)",
+		long: "Retrieve just the status/status_code/status_detail triple.\n\n" +
 			"dLocal serves this only within 12 months of the payment's creation date; " +
 			"an older payment returns 404 here even though 'payments get' may still resolve it.",
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flags := globals()
-			return shared.GetEntities(flags, args, func(ctx context.Context, client *api.Client, id string) (any, error) {
-				return shared.FetchItem(ctx, client, flags, "/payments/"+url.PathEscape(id)+"/status", nil)
-			})
-		},
+		pathPrefix: "/payments/",
+		pathSuffix: "/status",
 	})
-
-	registerDomainUsage(group, globals, paymentsUsage)
-	root.AddCommand(group)
 }
 
 func registerOrders(root *cobra.Command, globals shared.GlobalsFunc) {
-	group := &cobra.Command{
-		Use:   "orders",
-		Short: "Resolve merchant order ids to dLocal payments",
-	}
+	group := newResourceGroup(root, globals, "Resolve merchant order ids to dLocal payments", "", ordersUsage)
 
-	group.AddCommand(&cobra.Command{
-		Use:   "get <order_id>...",
-		Short: "Retrieve orders by the merchant's own order id",
-		Long: "Retrieve an order by the id YOUR system assigned, not dLocal's.\n\n" +
+	addGetCommand(group, globals, getSpec{
+		use:   "get <order_id>...",
+		short: "Retrieve orders by the merchant's own order id",
+		long: "Retrieve an order by the id YOUR system assigned, not dLocal's.\n\n" +
 			"This is the bridge from a merchant-side order reference to a dLocal payment_id, " +
 			"which is what the rest of the commands take.",
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flags := globals()
-			return shared.GetEntities(flags, args, func(ctx context.Context, client *api.Client, id string) (any, error) {
-				return shared.FetchItem(ctx, client, flags, "/orders/"+url.PathEscape(id), nil)
-			})
-		},
+		pathPrefix: "/orders/",
 	})
-
-	registerDomainUsage(group, globals, ordersUsage)
-	root.AddCommand(group)
 }
 
 func registerRefunds(root *cobra.Command, globals shared.GlobalsFunc) {
-	group := &cobra.Command{
-		Use:   "refunds",
-		Short: "Retrieve dLocal refunds",
-	}
+	group := newResourceGroup(root, globals, "Retrieve dLocal refunds", "", refundsUsage)
 
-	group.AddCommand(&cobra.Command{
-		Use:   "get <refund_id>...",
-		Short: "Retrieve refund records by id",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flags := globals()
-			return shared.GetEntities(flags, args, func(ctx context.Context, client *api.Client, id string) (any, error) {
-				return shared.FetchItem(ctx, client, flags, "/refunds/"+url.PathEscape(id), nil)
-			})
-		},
+	addGetCommand(group, globals, getSpec{
+		use:        "get <refund_id>...",
+		short:      "Retrieve refund records by id",
+		pathPrefix: "/refunds/",
 	})
-
-	registerDomainUsage(group, globals, refundsUsage)
-	root.AddCommand(group)
 }
 
 func registerChargebacks(root *cobra.Command, globals shared.GlobalsFunc) {
-	group := &cobra.Command{
-		Use:   "chargebacks",
-		Short: "Retrieve dLocal chargebacks",
-	}
+	group := newResourceGroup(root, globals, "Retrieve dLocal chargebacks", "", chargebacksUsage)
 
-	group.AddCommand(&cobra.Command{
-		Use:   "get <chargeback_id>...",
-		Short: "Retrieve chargeback records by id",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flags := globals()
-			return shared.GetEntities(flags, args, func(ctx context.Context, client *api.Client, id string) (any, error) {
-				return shared.FetchItem(ctx, client, flags, "/chargebacks/"+url.PathEscape(id), nil)
-			})
-		},
+	addGetCommand(group, globals, getSpec{
+		use:        "get <chargeback_id>...",
+		short:      "Retrieve chargeback records by id",
+		pathPrefix: "/chargebacks/",
 	})
-
-	registerDomainUsage(group, globals, chargebacksUsage)
-	root.AddCommand(group)
 }
 
 // registerPayouts targets a different HOST; the signing scheme is the same as
-// payins, confirmed against the live sandbox.
+// payins, confirmed against the live sandbox. That difference is one field on
+// the spec, which is why payouts can share the same registrar as everything else.
 func registerPayouts(root *cobra.Command, globals shared.GlobalsFunc) {
-	group := &cobra.Command{
-		Use:   "payouts",
-		Short: "Retrieve dLocal payouts",
-		Long: "Retrieve dLocal payouts.\n\n" +
-			"Payouts live on the marketplace-api host, using the same credentials and the same " +
-			"signing scheme as payins — only the host differs. Their error bodies do differ: " +
-			"codes are strings rather than numbers.",
-	}
+	group := newResourceGroup(root, globals, "Retrieve dLocal payouts",
+		"Retrieve dLocal payouts.\n\n"+
+			"Payouts live on the marketplace-api host, using the same credentials and the same "+
+			"signing scheme as payins — only the host differs. Their error bodies do differ: "+
+			"codes are strings rather than numbers.", payoutsUsage)
 
-	group.AddCommand(&cobra.Command{
-		Use:   "get <payout_id>...",
-		Short: "Retrieve payout records by id",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			flags := globals()
-			return shared.GetPayoutEntities(flags, args, func(ctx context.Context, client *api.Client, id string) (any, error) {
-				return shared.FetchItem(ctx, client, flags, "/v2/payouts/"+url.PathEscape(id), nil)
-			})
-		},
+	addGetCommand(group, globals, getSpec{
+		use:        "get <payout_id>...",
+		short:      "Retrieve payout records by id",
+		pathPrefix: "/v2/payouts/",
+		host:       shared.HostPayouts,
 	})
-
-	registerDomainUsage(group, globals, payoutsUsage)
-	root.AddCommand(group)
 }
 
 // registerPaymentMethods is the one "list"-shaped group in the CLI, and neither
@@ -156,15 +128,11 @@ func registerPayouts(root *cobra.Command, globals shared.GlobalsFunc) {
 // Countries are POSITIONAL and repeatable, mirroring `get <id>...`: one record
 // per country in input order. A merchant operating across several markets asks
 // about them together far more often than one at a time, and making that the
-// default shape means the output is the same whether you pass one country or
-// ten.
+// default shape means the output is the same whether you pass one country or ten.
 func registerPaymentMethods(root *cobra.Command, globals shared.GlobalsFunc) {
-	group := &cobra.Command{
-		Use:   "payment-methods",
-		Short: "Look up enabled payment methods by country",
-	}
+	group := newResourceGroup(root, globals, "Look up enabled payment methods by country", "", paymentMethodsUsage)
 
-	list := &cobra.Command{
+	group.AddCommand(&cobra.Command{
 		Use:   "list [COUNTRY...]",
 		Short: "List the payment methods enabled for one or more countries",
 		Long: "List the payment methods enabled for each country given.\n\n" +
@@ -172,20 +140,17 @@ func registerPaymentMethods(root *cobra.Command, globals shared.GlobalsFunc) {
 			"Emits one record per country, in the order given.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := globals()
-			return shared.WithResolvedProfile(flags, func(ctx context.Context, client *api.Client, profile config.Profile) error {
+			return shared.WithSession(flags, shared.HostPayins, func(ctx context.Context, session *shared.Session) error {
 				countries := args
 				if len(countries) == 0 {
-					countries = []string{flags.ResolveCountry("", profile.Country)}
+					countries = []string{flags.ResolveCountry("", session.Profile.Country)}
 				}
-				return shared.ListPaymentMethods(ctx, client, flags, countries)
+				return shared.ListPaymentMethods(ctx, session.Client, flags, countries)
 			})
 		},
-	}
-	group.AddCommand(list)
+	})
 
 	registerCountryDiscovery(group, globals)
-	registerDomainUsage(group, globals, paymentMethodsUsage)
-	root.AddCommand(group)
 }
 
 // registerCountryDiscovery answers "which markets can this merchant take money
@@ -205,7 +170,7 @@ func registerCountryDiscovery(group *cobra.Command, globals shared.GlobalsFunc) 
 		Short: "Discover which countries this merchant is enabled for",
 		Long: "Probe each of dLocal's markets and report which resolve for these credentials.\n\n" +
 			"dLocal has no list-countries endpoint, so this issues one GET per country " +
-			"(" + itoa(len(api.Markets)) + " by default) and reports the outcome of each. " +
+			"(" + strconv.Itoa(len(api.Markets)) + " by default) and reports the outcome of each. " +
 			"Pass country codes to probe a specific set instead, including codes not on the built-in list.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := globals()
@@ -214,17 +179,10 @@ func registerCountryDiscovery(group *cobra.Command, globals shared.GlobalsFunc) 
 				targets = api.Markets
 			}
 
-			return shared.WithClient(flags, func(ctx context.Context, client *api.Client) error {
-				results := shared.ProbeCountries(ctx, client, targets, concurrency)
+			return shared.WithSession(flags, shared.HostPayins, func(ctx context.Context, session *shared.Session) error {
+				results := shared.ProbeCountries(ctx, session.Client, targets, concurrency)
 				shared.SortProbes(results)
-				items := make([]any, 0, len(results))
-				for _, r := range results {
-					if supportedOnly && !r.Supported {
-						continue
-					}
-					items = append(items, r)
-				}
-				shared.WriteList(items, flags.Format)
+				shared.WriteList(selectProbes(results, supportedOnly), flags.Format)
 				return nil
 			})
 		},
@@ -234,6 +192,15 @@ func registerCountryDiscovery(group *cobra.Command, globals shared.GlobalsFunc) 
 	group.AddCommand(cmd)
 }
 
-func itoa(n int) string {
-	return strconv.Itoa(n)
+// selectProbes applies --supported. Pure, so the filtering is testable without
+// standing up a client.
+func selectProbes(results []shared.CountryProbe, supportedOnly bool) []any {
+	items := make([]any, 0, len(results))
+	for _, result := range results {
+		if supportedOnly && !result.Supported {
+			continue
+		}
+		items = append(items, result)
+	}
+	return items
 }

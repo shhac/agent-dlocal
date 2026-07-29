@@ -45,24 +45,14 @@ func ToAnySlice[T any](s []T) []any {
 	return result
 }
 
-// GetEntities runs the multi-capable get contract: one client, each id resolved
-// through getOne, streamed per the shared contract (NDJSON by default — one
-// record or {"@unresolved":…} per id in input order; item-level misses stay on
-// stdout with exit 0, command-level failures bubble to the single sink).
-func GetEntities(flags *GlobalFlags, args []string, getOne func(ctx context.Context, client *api.Client, id string) (any, error)) error {
-	return WithClient(flags, func(ctx context.Context, client *api.Client) error {
+// GetEntities runs the multi-capable get contract: one session, each id
+// resolved through getOne, streamed per the shared contract (NDJSON by default
+// — one record or {"@unresolved":…} per id in input order; item-level misses
+// stay on stdout, command-level failures bubble to the single sink).
+func GetEntities(flags *GlobalFlags, host Host, args []string, getOne func(ctx context.Context, session *Session, id string) (any, error)) error {
+	return WithSession(flags, host, func(ctx context.Context, session *Session) error {
 		return libcli.EntityGet(output.Stdout(), flags.Format, args, func(id string) (any, error) {
-			return getOne(ctx, client, id)
-		})
-	})
-}
-
-// GetPayoutEntities is GetEntities against the payouts host, which is a
-// separate service with its own signer.
-func GetPayoutEntities(flags *GlobalFlags, args []string, getOne func(ctx context.Context, client *api.Client, id string) (any, error)) error {
-	return WithPayoutsClient(flags, func(ctx context.Context, client *api.Client) error {
-		return libcli.EntityGet(output.Stdout(), flags.Format, args, func(id string) (any, error) {
-			return getOne(ctx, client, id)
+			return getOne(ctx, session, id)
 		})
 	})
 }

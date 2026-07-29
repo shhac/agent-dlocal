@@ -195,29 +195,27 @@ func registerCheck(parent *cobra.Command, globals shared.GlobalsFunc) {
 				flags.Profile = args[0]
 			}
 
-			resolved, err := shared.ResolveProfile(flags)
-			if err != nil {
-				return err
-			}
+			return shared.WithSession(flags, shared.HostPayins, func(ctx context.Context, session *shared.Session) error {
+				// The global --country wins over the profile's stored one, so
+				// probing a different market is the same flag here as everywhere.
+				lookupCountry := flags.ResolveCountry("", session.Profile.Country)
 
-			// The global --country wins over the profile's stored one, so probing
-			// a different market is the same flag here as everywhere else.
-			lookupCountry := flags.ResolveCountry("", resolved.Profile.Country)
-
-			return shared.WithResolvedClient(flags, resolved, func(ctx context.Context, client *api.Client) error {
-				methods, err := shared.FetchItem(ctx, client, flags, "/payments-methods", url.Values{"country": {lookupCountry}})
+				methods, err := shared.FetchItem(ctx, session.Client, flags, "/payments-methods", url.Values{"country": {lookupCountry}})
 				if err != nil {
 					return err
 				}
 				shared.WriteItem(map[string]any{
-					"status":                "ok",
-					"profile":               resolved.Alias,
-					"credential_source":     resolved.CredentialSource,
-					"environment":           resolved.Profile.Environment,
-					"base_url":              resolved.Profile.BaseURL,
+					"status":            "ok",
+					"profile":           session.Alias,
+					"credential_source": session.Source,
+					"environment":       session.Profile.Environment,
+					// The host actually used, not the profile's stored one:
+					// --base-url overrides it, and reporting the stored URL while
+					// verifying against another names the wrong ledger.
+					"base_url":              session.BaseURL,
 					"country":               lookupCountry,
 					"payment_methods_found": countMethods(methods),
-					"signature_scheme":      "V2-HMAC-SHA256",
+					"signature_scheme":      api.SignatureScheme,
 					"verified_by":           "GET /payments-methods",
 				}, flags.Format)
 				return nil
