@@ -16,6 +16,8 @@ jobs:
     secrets: inherit
     with:
       name: agent-dlocal
-      desc: "dLocal payments triage CLI for AI agents"
+      desc: "dLocal payments investigation and triage CLI for AI agents"
       formula_class: AgentDlocal
-      help_match: "dLocal payments triage CLI"
+      # Asserted against `agent-dlocal --help` by the generated formula's test
+      # block, so it must stay a literal substring of the root command's Short.
+      help_match: "dLocal payments investigation and triage CLI"
