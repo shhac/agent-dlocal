@@ -47,8 +47,8 @@ func Redact(data any, opts RedactionOptions) any {
 }
 
 func dlocalSecrets() out.RedactRule {
-	return func(path, key string, _ any, _ map[string]any) bool {
-		return shouldRedactField(key, path)
+	return func(field out.RedactField) bool {
+		return shouldRedactField(field.Key, field.Path)
 	}
 }
 

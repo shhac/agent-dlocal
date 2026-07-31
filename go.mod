@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/shhac/lib-agent-cli v0.21.0
 	github.com/shhac/lib-agent-mcp v0.23.1
-	github.com/shhac/lib-agent-output v0.10.0
+	github.com/shhac/lib-agent-output v0.12.0
 	github.com/spf13/cobra v1.10.2
 )
 
