@@ -1,14 +1,13 @@
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 
+	"github.com/shhac/lib-agent-cli/creds"
 	"github.com/shhac/lib-agent-cli/xdg"
 )
 
@@ -83,45 +82,78 @@ func ConfigPath() string {
 	return filepath.Join(ConfigDir(), "config.json")
 }
 
+// store is config.json's file: 0600 writes into a 0700 parent, atomic
+// replacement by rename, and Update for a locked read-modify-write. This was
+// hand-rolled with os.ReadFile/os.WriteFile, which carried a lost-update race —
+// two concurrent invocations (`auth add` racing `auth use`) each built their
+// write from a snapshot taken before the other landed, so all but the last were
+// erased.
+//
+// The 0700 parent is the reason the directory mode is not left to chance: it is
+// shared with credentials.json, which holds real secrets whenever the keychain
+// is unavailable.
+func store() creds.Store {
+	return creds.Store{Path: ConfigPath()}
+}
+
 func Read() *Config {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	if cache != nil {
 		return cache
 	}
-	data, err := os.ReadFile(ConfigPath())
-	if err != nil {
-		cache = defaultConfig()
-		return cache
-	}
+	cache = loadConfig()
+	return cache
+}
+
+// loadConfig reads config.json fresh from disk, bypassing the package cache. It
+// is the single definition of "what a from-scratch read looks like", shared by
+// Read (which caches the result) and updateConfig (which must never hand a
+// mutate callback the stale in-memory cache while holding the store's lock).
+func loadConfig() *Config {
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		cache = defaultConfig()
-		return cache
+	if err := store().Load(&cfg); err != nil {
+		return defaultConfig()
 	}
 	if cfg.Profiles == nil {
 		cfg.Profiles = make(map[string]Profile)
 	}
-	cache = &cfg
-	return cache
+	return &cfg
 }
 
 func Write(cfg *Config) error {
+	if err := store().Save(cfg); err != nil {
+		return err
+	}
+	cacheMu.Lock()
+	cache = nil
+	cacheMu.Unlock()
+	return nil
+}
+
+// updateConfig applies mutate to a freshly loaded config under ONE exclusive
+// lock spanning read, mutate and write, so two concurrent invocations serialize
+// instead of each building its write from a stale snapshot. The package cache is
+// bypassed entirely while the lock is held — mutate only ever sees what Update
+// just read from disk — and invalidated afterwards so a later Read cannot hand
+// back the pre-write value.
+//
+// A mutate that returns an error aborts the write, leaving the stored document
+// untouched.
+func updateConfig(mutate func(cfg *Config) error) error {
+	var cfg Config
+	err := store().Update(&cfg, func() error {
+		if cfg.Profiles == nil {
+			cfg.Profiles = make(map[string]Profile)
+		}
+		return mutate(&cfg)
+	})
+
 	cacheMu.Lock()
 	cache = nil
 	cacheMu.Unlock()
 
-	// 0700: this directory is shared with credentials.json, which holds real
-	// secrets whenever the keychain is unavailable.
-	dir := ConfigDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(ConfigPath(), append(data, '\n'), 0o644)
+	return err
 }
 
 func defaultConfig() *Config {
@@ -169,34 +201,39 @@ func defaultPayoutsBaseURL(environment string) string {
 }
 
 func StoreProfile(alias string, profile Profile) error {
-	cfg := Read()
-	cfg.Profiles[alias] = Normalize(profile)
-	if cfg.DefaultProfile == "" {
-		cfg.DefaultProfile = alias
-	}
-	return Write(cfg)
+	return updateConfig(func(cfg *Config) error {
+		cfg.Profiles[alias] = Normalize(profile)
+		if cfg.DefaultProfile == "" {
+			cfg.DefaultProfile = alias
+		}
+		return nil
+	})
 }
 
 func RemoveProfile(alias string) error {
-	cfg := Read()
-	delete(cfg.Profiles, alias)
-	if cfg.DefaultProfile == alias {
-		cfg.DefaultProfile = ""
-		for name := range cfg.Profiles {
-			cfg.DefaultProfile = name
-			break
+	return updateConfig(func(cfg *Config) error {
+		delete(cfg.Profiles, alias)
+		if cfg.DefaultProfile == alias {
+			cfg.DefaultProfile = ""
+			for name := range cfg.Profiles {
+				cfg.DefaultProfile = name
+				break
+			}
 		}
-	}
-	return Write(cfg)
+		return nil
+	})
 }
 
+// SetDefault rejects an unconfigured alias from inside the mutate callback, so
+// the error aborts Update before it writes rather than after.
 func SetDefault(alias string) error {
-	cfg := Read()
-	if _, ok := cfg.Profiles[alias]; !ok {
-		return fmt.Errorf("profile %q is not configured", alias)
-	}
-	cfg.DefaultProfile = alias
-	return Write(cfg)
+	return updateConfig(func(cfg *Config) error {
+		if _, ok := cfg.Profiles[alias]; !ok {
+			return fmt.Errorf("profile %q is not configured", alias)
+		}
+		cfg.DefaultProfile = alias
+		return nil
+	})
 }
 
 // defaultAccessors is the single definition of the settable config keys.
@@ -257,7 +294,8 @@ func writeDefault(key string, value *int) error {
 	if !ok {
 		return fmt.Errorf("%w %q", ErrUnknownKey, key)
 	}
-	cfg := Read()
-	accessor.set(&cfg.Defaults, value)
-	return Write(cfg)
+	return updateConfig(func(cfg *Config) error {
+		accessor.set(&cfg.Defaults, value)
+		return nil
+	})
 }

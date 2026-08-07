@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -159,5 +161,88 @@ func TestDefaultKeysCoversEveryAccessor(t *testing.T) {
 		if got, _ := ReadDefaultValue(key); got != nil {
 			t.Fatalf("ReadDefaultValue(%q) after unset = %v, want nil", key, got)
 		}
+	}
+}
+
+// Two CLI invocations at once each used to build their write from a snapshot
+// taken before the other landed, so all but the last were erased — with twenty
+// concurrent writers, one profile survived. StoreProfile now holds the store's
+// lock across read, mutate and write, so every profile must survive.
+func TestConcurrentStoreProfileKeepsEveryProfile(t *testing.T) {
+	SetConfigDir(t.TempDir())
+	t.Cleanup(func() { SetConfigDir("") })
+
+	const writers = 20
+
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			alias := fmt.Sprintf("merchant-%02d", i)
+			if err := StoreProfile(alias, Profile{Environment: EnvironmentSandbox}); err != nil {
+				errs <- fmt.Errorf("StoreProfile(%q): %w", alias, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+
+	// Read from disk, not the cache, so this measures what actually persisted.
+	cfg := loadConfig()
+	if len(cfg.Profiles) != writers {
+		t.Fatalf("%d of %d profiles survived concurrent writes: %v", len(cfg.Profiles), writers, cfg.Profiles)
+	}
+	for i := range writers {
+		alias := fmt.Sprintf("merchant-%02d", i)
+		if _, ok := cfg.Profiles[alias]; !ok {
+			t.Fatalf("profile %q was lost to a concurrent write", alias)
+		}
+	}
+}
+
+// The defaults block is a second read-modify-write against the same file, and
+// it interleaves with profile writes in practice (`auth add` racing
+// `config set`). Neither may erase the other.
+func TestConcurrentDefaultAndProfileWritesBothSurvive(t *testing.T) {
+	SetConfigDir(t.TempDir())
+	t.Cleanup(func() { SetConfigDir("") })
+
+	const writers = 20
+
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				alias := fmt.Sprintf("merchant-%02d", i)
+				if err := StoreProfile(alias, Profile{}); err != nil {
+					errs <- fmt.Errorf("StoreProfile(%q): %w", alias, err)
+				}
+				return
+			}
+			if err := SetDefaultValue("timeout_ms", 1000+i); err != nil {
+				errs <- fmt.Errorf("SetDefaultValue: %w", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig()
+	if len(cfg.Profiles) != writers/2 {
+		t.Fatalf("%d of %d profiles survived: %v", len(cfg.Profiles), writers/2, cfg.Profiles)
+	}
+	if cfg.Defaults.TimeoutMS == nil {
+		t.Fatal("timeout_ms was erased by a concurrent profile write")
 	}
 }

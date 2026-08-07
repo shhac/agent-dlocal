@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	"github.com/shhac/agent-dlocal/internal/config"
+	"github.com/shhac/lib-agent-cli/creds"
 )
 
 // keychainSentinel is stored in the index in place of the real credential blob
@@ -72,16 +73,23 @@ func credentialsPath() string {
 	return filepath.Join(config.ConfigDir(), "credentials.json")
 }
 
+// store is the credential index's file: 0600 writes into a 0700 parent, atomic
+// replacement by rename, and Update for a locked read-modify-write. This was
+// hand-rolled with os.ReadFile/os.WriteFile, which carried a lost-update race —
+// two concurrent writers each built their write from a snapshot taken before the
+// other landed, and the loser's entry simply vanished.
+//
+// That is worse here than a lost write usually is: the secrets are already in
+// the keychain by the time the index write happens, so a dropped entry strands a
+// live credential that `auth list` can no longer show and `auth remove` can no
+// longer look up.
+func store() creds.Store {
+	return creds.Store{Path: credentialsPath()}
+}
+
 func readIndex() (map[string]credentialEntry, error) {
-	data, err := os.ReadFile(credentialsPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]credentialEntry), nil
-		}
-		return nil, err
-	}
-	var index map[string]credentialEntry
-	if err := json.Unmarshal(data, &index); err != nil {
+	index := make(map[string]credentialEntry)
+	if err := store().Load(&index); err != nil {
 		return nil, err
 	}
 	if index == nil {
@@ -90,27 +98,29 @@ func readIndex() (map[string]credentialEntry, error) {
 	return index, nil
 }
 
-func writeIndex(index map[string]credentialEntry) error {
-	// 0700, not 0755: on the fallback path this directory holds credentials.json
-	// with real secrets in it, and a 0600 file inside a world-readable directory
-	// still leaks its existence and size. lib-agent-cli's creds.Store uses 0700
-	// for the same reason.
-	//
-	// Chmod as well as MkdirAll, because the directory is usually created first
-	// by config.Write and MkdirAll will not tighten one that already exists —
-	// including one left 0755 by an earlier version.
-	dir := config.ConfigDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(index, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(credentialsPath(), append(data, '\n'), 0o600)
+// updateIndex applies mutate to the index under the store's exclusive lock, so
+// concurrent `auth add`/`auth remove` invocations serialize rather than
+// clobbering each other. Returning an error from mutate aborts without writing.
+func updateIndex(mutate func(index map[string]credentialEntry) error) error {
+	index := make(map[string]credentialEntry)
+	return store().Update(&index, func() error {
+		if index == nil {
+			index = make(map[string]credentialEntry)
+		}
+		if err := tightenConfigDir(); err != nil {
+			return err
+		}
+		return mutate(index)
+	})
+}
+
+// tightenConfigDir narrows a config directory an earlier version may have left
+// 0755. On the fallback path it holds credentials.json with real secrets in it,
+// and a 0600 file inside a world-readable directory still leaks its existence
+// and size. creds.Store creates the directory 0700, but MkdirAll will not
+// tighten one that already exists — and config.Write usually creates it first.
+func tightenConfigDir() error {
+	return os.Chmod(config.ConfigDir(), 0o700)
 }
 
 // Store persists a credential set as one opaque blob. It prefers the OS
@@ -118,11 +128,6 @@ func writeIndex(index map[string]credentialEntry) error {
 // index file instead. Returns "keychain" or "file" so the caller can surface
 // which backend took it.
 func Store(name string, set Set) (string, error) {
-	index, err := readIndex()
-	if err != nil {
-		return "", err
-	}
-
 	blob, err := json.Marshal(set)
 	if err != nil {
 		return "", err
@@ -143,8 +148,13 @@ func Store(name string, set Set) (string, error) {
 		_ = keychain.Delete(name)
 	}
 
-	index[name] = entry
-	if err := writeIndex(index); err != nil {
+	// The index write is the step that must not race: the keychain already holds
+	// the secret by now, so an entry lost to a concurrent writer leaves that
+	// secret referenced by nothing.
+	if err := updateIndex(func(index map[string]credentialEntry) error {
+		index[name] = entry
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	return storage, nil
@@ -193,23 +203,21 @@ func Storage(name string) (string, error) {
 }
 
 func Remove(name string) error {
-	index, err := readIndex()
-	if err != nil {
-		return err
-	}
-	entry, ok := index[name]
-	if !ok {
-		return &NotFoundError{Name: name}
-	}
+	return updateIndex(func(index map[string]credentialEntry) error {
+		entry, ok := index[name]
+		if !ok {
+			return &NotFoundError{Name: name}
+		}
 
-	// Delete unconditionally rather than only when the index claims the
-	// keychain owns this profile: the index can be wrong in the safe-to-fix
-	// direction (a keychain item from an earlier store), and an extra delete of
-	// something absent is a no-op.
-	if err := keychain.Delete(name); err != nil && entry.KeychainManaged {
-		return err
-	}
+		// Delete unconditionally rather than only when the index claims the
+		// keychain owns this profile: the index can be wrong in the safe-to-fix
+		// direction (a keychain item from an earlier store), and an extra delete of
+		// something absent is a no-op.
+		if err := keychain.Delete(name); err != nil && entry.KeychainManaged {
+			return err
+		}
 
-	delete(index, name)
-	return writeIndex(index)
+		delete(index, name)
+		return nil
+	})
 }
