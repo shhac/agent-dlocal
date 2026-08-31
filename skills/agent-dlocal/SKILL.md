@@ -1,13 +1,13 @@
 ---
 name: agent-dlocal
 description: |
-  Investigate and triage dLocal payins, payouts, refunds, and chargebacks across LatAm, Africa, and Asia. Covers payment status, merchant order lookup, refund state, payout delivery, chargebacks, and per-country payment-method availability. Use when:
-  - Explaining why a dLocal payment failed, was rejected, expired, or is still pending
-  - Resolving a merchant order_id to a dLocal payment
-  - Explaining what happened to a refund, or whether it was partial or full
-  - Finding where a payout is and whether its status is final
-  - Checking which payment methods or banks a country supports
-  Triggers: "dlocal", "dLocal payment", "payin", "payout", "status_detail", "status_code", "X-Login", "X-Trans-Key", "Payload-Signature", "V2-HMAC-SHA256", "CPF", "PIX", "boleto", "PSE", "chargeback", "emerging markets payment", "LatAm payment"
+  Investigate and triage dLocal payins, payouts, refunds, and chargebacks
+  across LatAm, Africa, and Asia. Use when explaining why a payment failed,
+  was rejected, expired, or is still pending, resolving a merchant order_id
+  to a dLocal payment, tracing a refund's state or whether it was partial,
+  finding where a payout is and whether its status is final, or checking
+  which payment methods and banks a country supports. Triggers:
+  status_detail, X-Trans-Key, Payload-Signature, CPF, PIX, boleto, PSE.
 allowed-tools: Bash(agent-dlocal *) Bash(mockdlocal *) Read Grep Glob
 ---
 
