@@ -24,9 +24,19 @@ formula bump.**
    - `release.yml`'s `help_match` still appears in `agent-dlocal --help`. The
      formula test asserts it, so a reworded `Short` string fails the release
      rather than the build.
-3. Compute the new version by bumping the latest tag
-   (`git describe --tags --abbrev=0`): patch → x.y.(z+1), minor → x.(y+1).0,
-   major → (x+1).0.0.
+3. Compute the new version by bumping the latest **release** tag:
+
+   ```bash
+   latest=$(git tag --list 'v*' --sort=-v:refname | head -1)
+   ```
+
+   patch → x.y.(z+1), minor → x.(y+1).0, major → (x+1).0.0.
+
+   Do **not** use `git describe --tags --abbrev=0` here. It returns whichever
+   tag is nearest in history regardless of series, so a `skill-v*` tag from a
+   skill-only publish — or any other non-release tag — comes back as though it
+   were the current version, and the wrong series gets bumped. Filtering on
+   `v*` cannot match `skill-v*`, which does not start with `v`.
 4. Tag and push — this is the whole release:
    ```bash
    git tag "v${new_version}"
