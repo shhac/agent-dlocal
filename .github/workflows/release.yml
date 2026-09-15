@@ -16,7 +16,9 @@ jobs:
     secrets: inherit
     with:
       name: agent-dlocal
-      desc: "dLocal payments investigation and triage CLI for AI agents"
+      # Homebrew's desc audit requires a leading capital, so the brand cannot
+      # come first — "DLocal" would be wrong. The shared workflow enforces this.
+      desc: "Triage CLI for dLocal payments, built for AI agents"
       formula_class: AgentDlocal
       # Asserted against `agent-dlocal --help` by the generated formula's test
       # block, so it must stay a literal substring of the root command's Short.
